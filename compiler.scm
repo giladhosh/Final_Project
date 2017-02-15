@@ -1,7 +1,8 @@
 ;(load "pattern-matcher.scm")
 ;(load "pc.scm")
-(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Ass3\\pattern-matcher.scm")
-(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Ass3\\pc.scm")
+(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\pattern-matcher.scm")
+(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\pc.scm")
+(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\parser.so")
 
 
 ;from Mayer's tutorial:
@@ -697,6 +698,9 @@
                     exp))
        done))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assignment 2;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;Defined by Mayer
 (define *reserved-words*
@@ -1611,3 +1615,65 @@
          (let ((ans (box-run exp)))
            ans)
         ))
+
+
+;Code-gen main procedure.
+(define code-gen
+  (lambda (parsed-exp env params depth)
+    (cond
+      ((null? parsed-exp) "")
+      ;((check-type? parsed-exp '(seq)) (code-gen-seq parsed-exp env params depth))
+      ;((check-type? parsed-exp '(if3)) (code-gen-if3 parsed-exp env params depth))
+      ;((check-type? parsed-exp '(or)) (code-gen-or parsed-exp env params depth))
+      ;((check-type? parsed-exp '(const)) (code-gen-const parsed-exp env params depth))
+      ;((check-type? parsed-exp '(fvar)) (code-gen-fvar parsed-exp env params depth))
+      ;((check-type? parsed-exp '(applic)) (code-gen-applic parsed-exp env params depth))
+      ;((check-type? parsed-exp '(tc-applic)) (code-gen-tc-applic parsed-exp env params depth))
+      ;((check-type? parsed-exp '(lambda-simple)) (code-gen-lambda-simple parsed-exp env params depth))
+      ;((check-type? parsed-exp '(lambda-opt)) (code-gen-lambda-opt parsed-exp env params depth))
+      ;((check-type? parsed-exp '(lambda-variadic)) (code-gen-lambda-var parsed-exp env params depth))
+      ;((check-type? parsed-exp '(pvar)) (code-gen-pvar parsed-exp env params depth))
+      ;((check-type? parsed-exp '(bvar)) (code-gen-bvar parsed-exp env params depth))
+      ;((check-type? parsed-exp '(define)) (code-gen-define parsed-exp env params depth))
+      (else (error "code-gen" (format "~s" parsed-exp))))
+    ))
+
+
+(define compile-scheme-file 
+  (lambda (scheme-source cisc-output) ;gets names of files
+    (let ((ans-str-read-file (file->string scheme-source)))
+      (print_all (list (cons "ans-str-read-file" ans-str-read-file)))
+      (let ((ans (test-string <Sexpr> ans-str-read-file)))
+        (print_all (list (cons "ans-sexpr" ans)))
+        ans
+        ))))
+
+(define file->string
+  (lambda (in-file)
+    (let ((in-port (open-input-file in-file)))
+      (letrec ((run
+                (lambda ()
+                  (let ((ch (read-char in-port)))
+                    (if (eof-object? ch)
+                        (begin
+                          (close-input-port in-port)
+                          '())
+                        (cons ch (run)))))))
+        (list->string
+         (run))))))
+
+(define list->sexpr
+    (lambda(file-list)
+	    (let ((cont (lambda(match remaining) 
+				(if (null? remaining) 
+				(list match) 
+				(cons match (list->sexpr remaining)))))
+			   (fail (lambda(x) `(failed ,x))))
+			   
+        (<sexpr> file-list cont fail) 
+			)))
+			
+(define ass3
+	(lambda (exp) 
+		(map (lambda (expr) (annotate-tc(pe->lex-pe(box-set(remove-applic-lambda-nil(eliminate-nested-defines(parse expr))))))) exp )
+	))

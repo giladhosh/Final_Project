@@ -2,8 +2,6 @@
 ;(load "pc.scm")
 (load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\pattern-matcher.scm")
 (load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\pc.scm")
-(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\parser.so")
-
 
 ;from Mayer's tutorial:
 (define <whitespace>
@@ -698,9 +696,6 @@
                     exp))
        done))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Assignment 2;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;Defined by Mayer
 (define *reserved-words*
@@ -822,7 +817,7 @@
     (newline)
     (display (cdar lst))
     (if (null? (cdr lst))
-        (newline)
+        *void-object*
         (print_all (cdr lst)))))
 
 
@@ -862,6 +857,7 @@
 			((null? (cdr s)) (car s))
 			(else `(begin ,@s)))))
 
+
 ;verify lst is a list >= 2
 (define assignment-list?
   (lambda (lst)
@@ -879,6 +875,7 @@
                          (variable? (car assign-lst))
                          (null? (cddr assign-lst))))
                   let-lst))
+
     ))
 
 ; take a let assignment list, check it and return a list of two lists - vars and values(exprs)
@@ -898,6 +895,7 @@
           (lambda (s opt) (ret-opt `(,(car argl) ,@s) opt))
           (lambda (var) (ret-opt `(,(car argl)) var)))))
 ))
+
 
 (define and-macro-exp
   (lambda (expr) 
@@ -929,6 +927,7 @@
                     exp))
               seq)))) 
 
+
 (define letToApplic
   (lambda (listOfPairs body bodies)
     (let ((vars (car (seperate-vars-vals listOfPairs)))
@@ -959,9 +958,9 @@
       (let ((all_init_sets (map (lambda (var) `(,var #f)) vars))
             (all_set_bodies (map (lambda(var val) `(set! ,var ,val)) vars vals))
             (final_rest_bodies `(let () ,body ,@bodies)))
-        (let((begin_final `(,@all_set_bodies ,final_rest_bodies)));)
-          (let ((ans `(let ,all_init_sets ,@begin_final )))
-            ans
+          (let((begin_final `(,@all_set_bodies ,final_rest_bodies)));)
+            (let ((ans `(let ,all_init_sets ,@begin_final )))
+              ans
             ))))))
 
 (define check-seq? 
@@ -985,10 +984,11 @@
              (cons first (filter_let_bodies rest)); 'not-list-cannot-be-seq
              )
          )
-       )
+        )
     ))
 
-(define flat-begin
+
+ (define flat-begin
   (lambda(body bodies)
     (let ((all_bodies (cons body bodies)))
       (let ((unfiltered_ans `(seq ,@(map tag-parse all_bodies))))
@@ -996,79 +996,77 @@
           `(seq ,filtered_ans)
           )
         )
-      )
-    ))
+      )))
 
- 
- (define tag-parse
-   (let ((run
-          (compose-patterns
-           ;constants
-           (pattern-rule
-            (? 'el constant?)
-            (lambda(el) `(const ,el)))
-           ;quote
-           (pattern-rule
-            `(quote ,(? 'el)) ;no guards - returns list
-            (lambda(el) `(const ,el)))
-           ;symbol
-           (pattern-rule
+(define tag-parse
+  (let ((run
+         (compose-patterns
+          ;constants
+          (pattern-rule
+           (? 'el constant?)
+           (lambda(el) `(const ,el)))
+          ;quote
+          (pattern-rule
+           `(quote ,(? 'el)) ;no guards - returns list
+           (lambda(el) `(const ,el)))
+         ;symbol
+          (pattern-rule
            (? 'el variable?)
            (lambda(el) `(var ,el)))
-           
-           ;if
-           (pattern-rule
-            `(if
-              ,(? 'pred)
-              ,(? 'conequence)
-              ,(? 'alternative))
-            (lambda (pred consequence alternative)
-              `(if3 ,(tag-parse pred) ,(tag-parse consequence) ,(tag-parse alternative))))
-           ;if-no-consequence
-           (pattern-rule
+
+         ;if
+          (pattern-rule
+           `(if
+             ,(? 'pred)
+             ,(? 'conequence)
+             ,(? 'alternative))
+           (lambda (pred consequence alternative)
+             `(if3 ,(tag-parse pred) ,(tag-parse consequence) ,(tag-parse alternative))))
+          ;if-no-consequence
+          (pattern-rule
            `(if ,(? 'pred) ,(? 'conseq))
            (lambda(pred conseq) `(if3 ,(tag-parse pred) ,(tag-parse conseq) ,*void-object*)))
-           ;empty or
-           (pattern-rule
-            `(or)
-            (lambda() `,(tag-parse #f)))
-           ;or 1 element
-           (pattern-rule
-            `(or ,(? 'el))
-            (lambda(el) (tag-parse el)))
-           ;or
-           (pattern-rule
-            `(or ,(? 'first) ,(? 'second) . ,(? 'rest list?)) ;list? checks if there are any more params
-            (lambda(first second rest) `(or ,(map tag-parse `(,first ,second . ,rest)))))
-           
-           ;set!
-           (pattern-rule
-            `(set! ,(? 'first) ,(? 'rest))
-            (lambda (first rest)
-              `(set ,(tag-parse first) ,(tag-parse rest))))
-           
-           ;let*
-           (pattern-rule 
-            `(let* ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
-            (lambda (listOfPairs body bodies)
-              (if (null? listOfPairs)
-                  (tag-parse `((lambda () ,body ,@bodies))) 
-                  (tag-parse (let-star-To-Applic listOfPairs body bodies))
-                  )))
-           
-           ; let
-           (pattern-rule 
-            `(let ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
-            (lambda (listOfPairs body bodies)
-              (if (null? listOfPairs)
-                  (tag-parse `((lambda () ,body ,@bodies)))
+          ;empty or
+          (pattern-rule
+           `(or)
+           (lambda() `,(tag-parse #f)))
+          ;or 1 element
+          (pattern-rule
+           `(or ,(? 'el))
+           (lambda(el) (tag-parse el)))
+          ;or
+          (pattern-rule
+           `(or ,(? 'first) ,(? 'second) . ,(? 'rest list?)) ;list? checks if there are any more params
+           (lambda(first second rest) `(or ,(map tag-parse `(,first ,second . ,rest)))))
+
+          ;set!
+          (pattern-rule
+           `(set! ,(? 'first) ,(? 'rest))
+           (lambda (first rest)
+             `(set ,(tag-parse first) ,(tag-parse rest))))
+
+          ;let*
+          (pattern-rule 
+           `(let* ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
+           (lambda (listOfPairs body bodies)
+             (if (null? listOfPairs)
+             (tag-parse `((lambda () ,body ,@bodies))) 
+             (tag-parse (let-star-To-Applic listOfPairs body bodies))
+              )))
+          
+          ; let
+          (pattern-rule 
+           `(let ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
+           (lambda (listOfPairs body bodies)
+             (if (null? listOfPairs)
+             (tag-parse `((lambda () ,body ,@bodies)))
              (tag-parse (letToApplic listOfPairs body bodies)))
-              ))
-           
-           ;letrec 
-           (pattern-rule 
-            `(letrec ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
-            (lambda (listOfPairs body bodies)
+             ))
+          
+          ;letrec 
+          (pattern-rule 
+           `(letrec ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
+           (lambda (listOfPairs body bodies)
              (if (null? listOfPairs)
              (tag-parse `((lambda () ((lambda () ,(beginify (cons body bodies))) ,@listOfPairs)) ,@listOfPairs))
              (tag-parse
@@ -1154,11 +1152,200 @@
 
 (define parse tag-parse)
 
-;-----------------------------------------------Assignment 3----------------------------------------------------------
- 
+(define isLambda?
+		(let ((run
+         (compose-patterns
+         	(pattern-rule 
+           `(lambda-simple ,(? 'argl) ,(? 'body) . ,(? 'rest))
+            (lambda (argl body rest) #t))
+          	(pattern-rule 
+           `(lambda-opt ,(? 'argl) ,(? 'body) . ,(? 'rest))
+           	(lambda (argl body rest)  #t)) 
+         	(pattern-rule 
+          `(lambda-var ,(? 'argl) ,(? 'body) . ,(? 'rest))
+         	(lambda (argl body rest) #t)))))
+		(lambda (sexpr)
+          (run sexpr (lambda () #f)))
+))
 
-;------------------------------------remove empty application---------------------------------------------
-;checks if statment is an empty application
+(define isDef?
+	(let ((run 
+		(compose-patterns
+		(pattern-rule
+		 `(def ,(? 'var) ,(? 'definition))
+    		(lambda (var definition) #t)))))
+	(lambda (sexpr)
+      (run sexpr (lambda () #f)))) 
+
+	
+)
+
+(define suspectLambda
+  (lambda (lambdaExp) 
+   (let
+
+     ((lambdaSym (car lambdaExp))
+     (lambdaArgs (cadr lambdaExp))
+     (lambdaBody (caddr lambdaExp)))
+       (letrec ((defList (list))
+                (loop (lambda (lambdaBody)
+                  (cond 
+                   ((null? lambdaBody) (list))
+                   ((isLambda? lambdaBody) (cons lambdaSym (cons lambdaArgs (eliminate-nested-defines lambdaBody))))
+                   ((equal? 'seq (car lambdaBody)) `(,@(cons lambdaSym (cons lambdaArgs `((seq ,(loop (cadr lambdaBody))))))))
+                    ((isDef? (car lambdaBody)) (begin (set! defList (append defList `(,(cdar lambdaBody))))
+                                               (loop (cdr lambdaBody))))
+                    ((null? defList) (eliminate-nested-defines lambdaBody))
+                    (else
+
+                      (let* ((init_sets (map (lambda (exp) (list 'const #f)) defList))
+                            (set_bodies (map (lambda (exp) `(set ,(car exp) ,(eliminate-nested-defines (cadr exp)))) 
+                                 defList)) 
+                            (defArgs (map (lambda (exp) (cadar exp)) defList))
+                            (body  `(seq (,@set_bodies ,(eliminate-nested-defines (car lambdaBody)) ,@(cdr lambdaBody)))))
+                           `( (applic (lambda-simple ,defArgs ,body) ,init_sets))))
+                      )
+          )
+        ))
+                (loop lambdaBody)))
+                             
+
+
+))
+
+
+(define eliminate-nested-defines
+  (lambda (exp)
+    (letrec 
+    	((rec (lambda (newExp)
+              (cond 
+                    ((not (list? newExp)) newExp)
+                    ((null? newExp) (list))
+                    ((isLambda? newExp) (suspectLambda newExp))
+                (else 
+
+                    (cons (rec (car newExp)) (rec (cdr newExp))))))))
+  (rec exp))
+
+  ))
+
+(define isVar?
+  (lambda (exp) (equal? 'var (car exp)))
+)
+
+(define checkLex
+  (lambda (exp argsList) 
+    (letrec ((minor 0) (major -1) (exists #f) (arg (cadr exp))
+            (loop (lambda (argsList2)
+               (if (null? argsList2) `(fvar ,arg)
+               (if (null? (car argsList2)) (begin (set! major (+ major 1)) 
+               (loop (cdr argsList2))) 
+                (map (lambda (exp) 
+                
+                  (if (equal? exp arg) (set! exists #t)
+                  (if (not exists) (set! minor (+ minor 1))))) (car argsList2))))
+               (if (and exists (= major -1)) `(pvar ,arg ,minor)  
+                    (if exists `(bvar ,arg ,major ,minor ) 
+                    (begin (set! major (+ major 1)) 
+                           (set! minor 0)
+                         (if (null? argsList2) `(fvar ,arg) (loop (cdr argsList2)))))) 
+            ))
+
+    ) (loop argsList))
+))
+
+(define pe->lex-pe
+  (lambda (exp) 
+    (letrec ((rec (lambda (newExp argsList)
+              (cond ((not (list? newExp)) newExp)
+                    ((null? newExp) (list))
+                    ((and (isVar? newExp) (null? argsList)) `(fvar ,(cadr newExp)))
+                    ((isLambda? newExp) (begin (set! argsList (append `(,(cadr newExp)) argsList)) 
+                                        (cons (rec (car newExp) argsList) (rec (cdr newExp) argsList))))
+                    ((and (isVar? newExp) (not (null? argsList))) (checkLex newExp argsList))
+                    (else (cons (rec (car newExp) argsList) (rec (cdr newExp) argsList)))
+
+              ))))
+  
+    (rec exp (list)))
+))
+
+
+(define cut
+    (lambda (exp)
+        (letrec
+                ((helper (lambda (list1 list2)
+                                    (if (null? (cdr list1))
+                                        list2
+                                        (helper (cdr list1) (append list2 (list (car list1))))))))
+                (helper exp '()))))
+             
+(define last
+    (lambda (exp)
+        (if (null? (cdr exp))
+            (car exp)
+            (last (cdr exp)))))
+            
+(define handleLambda
+  (lambda (exp)
+    (let ((first (car exp)) 
+          (second (cadr exp))
+          (third (caddr exp)) 
+          (fourth (caddr exp)))
+  (if (equal? first 'lambda-opt)
+                               `(,first ,second ,third ,(helper fourth #t))
+                               `(,first ,second ,(helper third #t))))
+))
+
+(define handleApplic
+      (lambda (exp tp)
+        (let ((first (cadr exp))
+              (second (caddr exp)))
+       (if (equal? #t tp)
+                        `(tc-applic ,(helper first #f) ,(map (lambda (expr) (helper expr #f)) second))
+                        `(applic ,(helper first #f) ,(map (lambda (expr) (helper expr #f)) second))))
+    
+))
+
+(define handleSeqOr
+  (lambda (exp tp)
+    (let ((first (car exp))
+         (second (cadr exp)))
+`(,first (,@(append (map (lambda (expr) (helper expr #f)) (cut second))) ,(helper (last second) tp))))
+
+))
+
+(define handleIf
+  (lambda (exp tp) 
+    (let ((first (cadr exp))
+          (second (caddr exp))
+          (third (cadddr exp)))
+            `(if3 ,(helper first #f)
+            ,(helper second tp)
+            ,(helper third tp)))
+  )
+)
+
+(define helper
+    (lambda (exp tp)
+        (cond
+            ((isLambda? exp) (handleLambda exp))
+            ((equal? (car exp) 'box-set) `(box-set ,(cadr exp) ,(helper (caddr exp) #f)))
+            ((equal? (car exp) 'if3) (handleIf exp tp))
+            ((equal? (car exp) 'applic) (handleApplic exp tp))
+            ((equal? (car exp) 'set) `(set ,(cadr exp) ,(helper (caddr exp) #f)))
+            ((or (equal? (car exp) 'seq) (equal? (car exp) 'or)) (handleSeqOr exp tp))  
+            ((or (isVar?  exp) (equal? (car exp) 'const) (not (list? exp))) exp)
+            ((isDef? exp) `(def ,(cadr exp) ,(helper (caddr exp) #f)))  
+            (else exp))))
+            
+            
+(define annotate-tc
+    (lambda (exp)
+      (print_all (list (cons "entered annotate-tc with " exp)))
+        (helper exp #f)))
+
+
 (define check-empty-lambda? 
   (lambda (exp)
     (if (or (not(list? exp)) (list?(car exp)) (not (equal? (car exp) 'applic)) (null?(cdr exp)) (not (list?(cadr exp))) (null? (cadr exp)) (null? (caadr exp)) (not (equal? (caadr exp) 'lambda-simple))  );(null? (caddr exp))) 
@@ -1217,92 +1404,7 @@
            (member? first type))
  ))
 
-;checks annotate base cases
- (define pass-anno-tc-base-cases?
-   (lambda(exp)
-     (or (null? exp) (not (list? exp)) 
-         (check-type? exp var_names) (check-type? exp '(const seq applic)) )
-     ))
 
- ;receives only lambda bodies, determines which applic is tc
-#;(define run-in-lambda ;change this !!! run in *all-forms-that-can-be-tail* (lambda seq if ..)
-  (lambda(lamb_bodies) 
-    (let ((first (car exp))
-          (rest (cdr exp)))
-      ;(if(check-type? first '(seq))
-         
-      ;)
-      )))
-
-(define has_next?
-  (lambda (lst)
-    (let ((current (car lst))
-          (next (cdr lst)))
-      (null? next))))
-
-;receives bodies of or, cannot be empty, only check last body
-(define annotate_or
-  (lambda (or_exp)
-    (let ((current (car or_exp)))
-      ;(display "run annotate or")
-      ;(print_all (list (cons "or_exp" or_exp) (cons "current" current)))
-      (if (has_next? or_exp)
-          (cons current (annotate_or or_exp))
-          (annotate-tc-run or_exp) ; annotate last body
-          ))
-    ))
-
-;annotate if exp
-(define annotate_if
-  (lambda (if_exp)
-    (let ((pred (cadr if_exp))
-          (conseq (caddr if_exp))
-          (alt (cdddr if_exp)))
-      (let ((ans-to-if `(if3 ,pred ,(annotate-tc-run conseq) ,@(annotate-tc-run alt)))) ;change this!!
-       ; (print_all (list (cons "ans-to-if" ans-to-if)))
-        ans-to-if
-        )
-      )
-    ))
-
-;annotate def exp
-(define annotate_def
-  (lambda (def_exp)
-    (let ((var (cadr def_exp))
-          (definition (caddr def_exp)))
-      (let ((ans-to-def `(def ,var ,(annotate-tc-run definition))))
-        ;(print_all (list (cons "var" var) (cons "definition" definition) (cons "ans-to-def" ans-to-def)))
-        ans-to-def
-        )
-      )
-    ))
-     
-(define annotate-tc-run
-  (lambda(exp)
-    (cond ((pass-anno-tc-base-cases? exp) exp)
-          ((check-type? exp '(or)) (cons 'or (annotate_or (cadr exp)))) ;or cannot be empty
-          ((check-type? exp '(if3)) (annotate_if exp))
-          ((check-type? exp '(def)) (annotate_def exp))
-          ;((check-type? exp '(applic)) exp)
-          (else (let ((first_exp (car exp))
-                (rest_exps (cdr exp)))
-            ;(print_all (list (cons "first_exp" first_exp) (cons "rest_exps" rest_exps)))
-            (if(member? first_exp lambda_names) ;check if first exp of exp is a lambda exp
-               (let ((lamb_vars (cadr rest_exps))
-                     (lamb_bodies (get-lamb-bodies exp)))
-                ; (print_all (list(cons "lamb_vars" lamb_vars) (cons "lamb_bodies" lamb_bodies)))
-                 (cons first_exp (cons lamb_vars (run-in-lambda rest_exps)))) ; run on body of lambda , first is of lambda_names
-               (cons (annotate-tc-run first_exp) (annotate-tc-run rest_exps))
-               )))
-          )))
-
-(define annotate-tc
-  (lambda(exp)
-        (let ((ans (annotate-tc-run exp)))
-          (print_all (list (cons "ans" ans)))
-          ans
-          )
-    ))
 
 ;--------------------------------------- box-set ---------------------------------------------
 
@@ -1360,7 +1462,7 @@
           (let ((ans
                  (if (check-type? if_or_exp '(or))
                      `(,command ,@(map box-run all_exps))
-                     `(,command ,(map box-run all_exps))))) ;check if we need to run this for pred (i think we do)
+                     `(,command ,@(map box-run all_exps))))) ;check if we need to run this for pred (i think we do)
             ;(print_all (list (cons "ans-to-check-box-inside-if-or " ans)))
            ans
           )))
@@ -1503,7 +1605,7 @@
                   ((check-type? exp '(box-set)) `(box-set ,(cadr exp) ,(box-t-mf-pvar (caddr exp) var)))
                   ((check-type? exp '(or)) `(or ,@(map (lambda(body) (box-t-mf-pvar body var)) (get-or-bodies exp)))) ;check if seq, check all bodies 
                   ((check-type? exp '(seq)) `(seq ,(map (lambda(body) (box-t-mf-pvar body var)) (get-seq-or-bodies exp)))) ;check if seq, check all bodies 
-                  ((check-type? exp '(if3)) `(if3 ,(map (lambda(el) (box-t-mf-pvar el var )) (cdr exp)))) ;check pred seq alt
+                  ((check-type? exp '(if3)) `(if3 ,@(map (lambda(el) (box-t-mf-pvar el var )) (cdr exp)))) ;check pred seq alt
                   ((check-type? exp '(applic)) `(applic ,@(map (lambda(el) (box-t-mf-pvar el var )) (cdr exp))))
                   ((check-type? exp '(set)) (if (equal? (cadr exp) (list 'var var))
                                                 `(box-set (var ,var) ,(caddr exp) )
@@ -1614,8 +1716,14 @@
    (lambda(exp)
          (let ((ans (box-run exp)))
            ans)
-        ))
+        ))                         
+             
+(define op
+  (lambda(exp)  (annotate-tc (pe->lex-pe (box-set (remove-applic-lambda-nil (eliminate-nested-defines exp)))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Project;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;Code-gen main procedure.
 (define code-gen
@@ -1641,12 +1749,56 @@
 
 (define compile-scheme-file 
   (lambda (scheme-source cisc-output) ;gets names of files
-    (let ((ans-str-read-file (file->string scheme-source)))
-      (print_all (list (cons "ans-str-read-file" ans-str-read-file)))
-      (let ((ans (test-string <Sexpr> ans-str-read-file)))
-        (print_all (list (cons "ans-sexpr" ans)))
-        ans
+    (let ((ans-sexpr-read-file `(,(car(file->sexpr scheme-source))))) ;car wrong??
+      (print_all (list (cons "ans-sexpr-read-file" (car ans-sexpr-read-file))))
+      (print_all (list (cons "type of ans-sexpr-read-file symbol?"  (symbol? (car ans-sexpr-read-file)))
+                       (cons "type of ans-sexpr-read-file string?" (string? (car ans-sexpr-read-file)))
+                 (cons "type of ans-sexpr-read-file list?" (list? (car ans-sexpr-read-file)))))
+      (let ((ans-run-assignment3 (run-assignment3 ans-sexpr-read-file)))
+        (print_all (list (cons "ans-run-assignment3" ans-run-assignment3)))
+        ans-run-assignment3
         ))))
+
+(define file->sexpr
+  (lambda (input)
+    (let ((file->sexpr-ans  (list->sexpr (file->string input))))
+     (print_all (list (cons "file->sexpr-ans" (car file->sexpr-ans))))
+      (car file->sexpr-ans)
+  )))
+
+;runs on each sub-expression
+(define run-assignment3
+  (lambda (sexprs) 
+    (print_all (list (cons "entered run-assignment3 with " sexprs)))
+    (let ((parsed-sexp (parse sexprs)))
+      (print_all (list (cons "parsed-sexp" parsed-sexp)))
+      (let ((pe-eliminated-nes-def (eliminate-nested-defines parsed-sexp)))
+        (print_all (list (cons "pe-eliminated-nes-def" pe-eliminated-nes-def)))
+        (let ((pe-elim-removed-applic-nil (remove-applic-lambda-nil pe-eliminated-nes-def)))
+          (print_all (list (cons "pe-elim-removed-applic-nil" pe-elim-removed-applic-nil)))
+          (let((boxed-exp (box-set pe-elim-removed-applic-nil)))
+            (print_all (list (cons "boxed-exp" boxed-exp)))
+            (let ((lexed-exp (pe->lex-pe boxed-exp)))
+              (print_all (list (cons "lexed-exp" lexed-exp)))
+              (let ((done-exp ;(annotate-tc 
+                     lexed-exp));)
+                (print_all (list (cons "ans run-assignment3" done-exp)))
+                done-exp
+                ))))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;junk-yard;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+		
+(define list->sexpr
+    (lambda(file-as-list)
+      (let ((cont (lambda(match remaining) 
+                    (if (null? remaining) 
+                        (list match) 
+                        (cons match (list->sexpr remaining)))))
+            (fail (lambda(x) `(failed ,x))))
+        
+        (<Sexpr> file-as-list cont fail) 
+			)))
 
 (define file->string
   (lambda (in-file)
@@ -1659,21 +1811,6 @@
                           (close-input-port in-port)
                           '())
                         (cons ch (run)))))))
-        (list->string
-         (run))))))
+        ;(list->string
+         (run)))));)
 
-(define list->sexpr
-    (lambda(file-list)
-	    (let ((cont (lambda(match remaining) 
-				(if (null? remaining) 
-				(list match) 
-				(cons match (list->sexpr remaining)))))
-			   (fail (lambda(x) `(failed ,x))))
-			   
-        (<sexpr> file-list cont fail) 
-			)))
-			
-(define ass3
-	(lambda (exp) 
-		(map (lambda (expr) (annotate-tc(pe->lex-pe(box-set(remove-applic-lambda-nil(eliminate-nested-defines(parse expr))))))) exp )
-	))

@@ -1706,8 +1706,7 @@
            (let ((first_exp (car exp))
                  (rest_exps (cdr exp)))
              ;(print_all (list (cons "first_exp" first_exp) (cons "rest_exps" rest_exps)))
-             (cons (box-run first_exp) (box-run rest_exps))
-             ))
+             (cons (box-run first_exp) (box-run rest_exps))))
           )
     ))
 
@@ -1719,13 +1718,134 @@
         ))                         
              
 (define op
-  (lambda(exp)  (annotate-tc (pe->lex-pe (box-set (remove-applic-lambda-nil (eliminate-nested-defines exp)))))))
+  (lambda(exp) (annotate-tc (pe->lex-pe (box-set (remove-applic-lambda-nil (eliminate-nested-defines exp)))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Project;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;Code-gen main procedure.
+(define run-ass3
+  (lambda (pe)
+    ;(annotate-tc 
+    (pe->lex-pe (box-set (remove-applic-lambda-nil (eliminate-nested-defines pe))))));)
+
+
+;;;;getters;;;;;;;;
+(define const-exp->value cadr)
+
+
+
+;;;;;;constant table ;;;;;;;;;
+(define *ctbl-start-location* 1000) ;start location for constants
+(define *init-ctbl* '()) ;initial value of constant table
+;(define make-ctbl cons) ;(lambda (tbl-size tbl) (cons tbl-size tbl))) == cons ; constant table maker
+(define constant-tbl (box (cons *ctbl-start-location* *init-ctbl*))) ;the constant table
+;getters ctbl
+(define ctbl-get-size  (lambda (ctbl) (car (unbox ctbl))))
+(define ctbl-get-entries  (lambda (ctbl) (cdr (unbox ctbl)))) 
+;ctbl entries
+(define make-constant-tbl-entry
+  (lambda (address constant memory-rep)
+    (list address constant memory-rep)
+    ))
+(define ctbl-entry-get-address  car)
+(define ctbl-entry-get-constant  cadr)
+(define ctbl-entry-get-memory-rep  caddr)
+(define ctbl-entry-get-address  car)
+
+(define ctbl-lookup
+  (lambda (boxed-ctbl constant)
+    (ormap (lambda (entry) (if (equal? constant (ctbl-entry-get-constant entry)) entry #f))
+           (ctbl-get-entries boxed-ctbl))))
+
+;borrowed
+(define constant-adder
+  (lambda (const data)
+    (let* ((ctbl (unbox const-table))
+           (size (ctbl->size ctbl))
+           (table (ctbl->table ctbl))
+           (entry (ctbl-table-lookup table const)))
+      (if entry
+          entry
+          (let ((new-entry (^ctbl-entry size const data)))
+            (set-box! const-table (^ctbl (+ size (length data)) (cons new-entry table)))
+            new-entry)))))
+
+
+;recurssive, adds all constants to table
+(define add-constant-to-table
+  (lambda (const-value)
+    (if (null? const-value)
+        (make-constant-tbl-entry "SOB_NIL" const `("T_NIL"))
+        (cond 
+          ((boolean? const-value) (if const-value
+                                      'add-true
+                                      'add-false))
+          (else (error "add-constant-to-table" (format "~s" const))))
+          )
+    ;*void-object* 
+    ))
+
+(define build-tables
+  (lambda (pe)
+    (if (or (null? pe) (not (pair? pe)))
+        pe
+        (cond 
+          ((check-type? pe '(fvar)) (display 'add-to-var-table))
+          ((check-type? pe '(const)) (add-constant-to-table (const-exp->value pe)))
+          (else (map build-tables pe))
+          ))
+    ;*void-object* 
+    ))
+
+
+(define compile-scheme-file 
+  (lambda (scheme-source cisc-output) ;gets names of files
+    (let ((sexpr (file->sexpr scheme-source)))
+      (print_all (list (cons "sexpr after process " sexpr)))
+      (let ((parsed-exp (parse sexpr)))
+        (let((ready_code (run-ass3 parsed-exp)))
+          (let ((build-tables ready_code))
+            build-tables)
+        )))))
+
+(define file->sexpr
+  (lambda (input)
+    (let ((file2sexpr-ans  (car (list->sexpr (file->list input)))))
+     (print_all (list (cons "file2sexpr-ans" file2sexpr-ans)))
+       file2sexpr-ans
+  )))
+
+
+(define list->sexpr
+    (lambda(file-as-list)
+      (let ((cont (lambda(match remaining) 
+                    (if (null? remaining) 
+                        (list match) 
+                        (cons match (list->sexpr remaining)))))
+            (fail (lambda(x) `(failed ,x))))
+        
+        (<Sexpr> file-as-list cont fail) 
+			)))
+
+(define file->list
+  (lambda (in-file)
+    (let ((in-port (open-input-file in-file)))
+      (letrec ((run
+                (lambda ()
+                  (let ((ch (read-char in-port)))
+                    (if (eof-object? ch)
+                        (begin
+                          (close-input-port in-port)
+                          '())
+                        (cons ch (run)))))))
+        ;(list->string
+         (run)))));)
+
+
+      
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;Code-gen;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (define code-gen
   (lambda (parsed-exp env params depth)
     (cond
@@ -1746,71 +1866,5 @@
       (else (error "code-gen" (format "~s" parsed-exp))))
     ))
 
-
-(define compile-scheme-file 
-  (lambda (scheme-source cisc-output) ;gets names of files
-    (let ((ans-sexpr-read-file `(,(car(file->sexpr scheme-source))))) ;car wrong??
-      (print_all (list (cons "ans-sexpr-read-file" (car ans-sexpr-read-file))))
-      (print_all (list (cons "type of ans-sexpr-read-file symbol?"  (symbol? (car ans-sexpr-read-file)))
-                       (cons "type of ans-sexpr-read-file string?" (string? (car ans-sexpr-read-file)))
-                 (cons "type of ans-sexpr-read-file list?" (list? (car ans-sexpr-read-file)))))
-      (let ((ans-run-assignment3 (run-assignment3 ans-sexpr-read-file)))
-        (print_all (list (cons "ans-run-assignment3" ans-run-assignment3)))
-        ans-run-assignment3
-        ))))
-
-(define file->sexpr
-  (lambda (input)
-    (let ((file->sexpr-ans  (list->sexpr (file->string input))))
-     (print_all (list (cons "file->sexpr-ans" (car file->sexpr-ans))))
-      (car file->sexpr-ans)
-  )))
-
-;runs on each sub-expression
-(define run-assignment3
-  (lambda (sexprs) 
-    (print_all (list (cons "entered run-assignment3 with " sexprs)))
-    (let ((parsed-sexp (parse sexprs)))
-      (print_all (list (cons "parsed-sexp" parsed-sexp)))
-      (let ((pe-eliminated-nes-def (eliminate-nested-defines parsed-sexp)))
-        (print_all (list (cons "pe-eliminated-nes-def" pe-eliminated-nes-def)))
-        (let ((pe-elim-removed-applic-nil (remove-applic-lambda-nil pe-eliminated-nes-def)))
-          (print_all (list (cons "pe-elim-removed-applic-nil" pe-elim-removed-applic-nil)))
-          (let((boxed-exp (box-set pe-elim-removed-applic-nil)))
-            (print_all (list (cons "boxed-exp" boxed-exp)))
-            (let ((lexed-exp (pe->lex-pe boxed-exp)))
-              (print_all (list (cons "lexed-exp" lexed-exp)))
-              (let ((done-exp ;(annotate-tc 
-                     lexed-exp));)
-                (print_all (list (cons "ans run-assignment3" done-exp)))
-                done-exp
-                ))))))))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;junk-yard;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 		
-(define list->sexpr
-    (lambda(file-as-list)
-      (let ((cont (lambda(match remaining) 
-                    (if (null? remaining) 
-                        (list match) 
-                        (cons match (list->sexpr remaining)))))
-            (fail (lambda(x) `(failed ,x))))
-        
-        (<Sexpr> file-as-list cont fail) 
-			)))
-
-(define file->string
-  (lambda (in-file)
-    (let ((in-port (open-input-file in-file)))
-      (letrec ((run
-                (lambda ()
-                  (let ((ch (read-char in-port)))
-                    (if (eof-object? ch)
-                        (begin
-                          (close-input-port in-port)
-                          '())
-                        (cons ch (run)))))))
-        ;(list->string
-         (run)))));)
-

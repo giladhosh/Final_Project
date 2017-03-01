@@ -2,6 +2,8 @@
 ;(load "pc.scm")
 (load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\pattern-matcher.scm")
 (load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\pc.scm")
+;;;;; Usage: make-full-code function receives code gen answer and returns full program in string
+(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\prolog_n_epilog.scm")
 
 ;from Mayer's tutorial:
 (define <whitespace>
@@ -1735,70 +1737,210 @@
 (define const-exp->value cadr)
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tables;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;fvar table;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+
+
+
 
 ;;;;;;constant table ;;;;;;;;;
 (define *ctbl-start-location* 1000) ;start location for constants
 (define *init-ctbl* '()) ;initial value of constant table
-;(define make-ctbl cons) ;(lambda (tbl-size tbl) (cons tbl-size tbl))) == cons ; constant table maker
-(define constant-tbl (box (cons *ctbl-start-location* *init-ctbl*))) ;the constant table
+(define make-ctbl cons) ;(lambda (tbl-size tbl) (cons tbl-size tbl))) == cons ; constant table maker
+(define constant-tbl (box (make-ctbl *ctbl-start-location* *init-ctbl*))) ;the constant table
+(define get-ctbl (lambda() (unbox constant-tbl)))
 ;getters ctbl
-(define ctbl-get-size  (lambda (ctbl) (car (unbox ctbl))))
-(define ctbl-get-entries  (lambda (ctbl) (cdr (unbox ctbl)))) 
+(define get-ctbl-size car);(lambda (ctbl) (car (unbox ctbl))))
+(define get-ctbl-entries cdr);(lambda (ctbl) (cdr (unbox ctbl)))) 
+(define get-ctbl-end-address (lambda () (get-ctbl-size (get-ctbl))))
 ;ctbl entries
 (define make-constant-tbl-entry
   (lambda (address constant memory-rep)
     (list address constant memory-rep)
     ))
+;getters for entries
 (define ctbl-entry-get-address  car)
 (define ctbl-entry-get-constant  cadr)
 (define ctbl-entry-get-memory-rep  caddr)
 (define ctbl-entry-get-address  car)
 
 (define ctbl-lookup
-  (lambda (boxed-ctbl constant)
-    (ormap (lambda (entry) (if (equal? constant (ctbl-entry-get-constant entry)) entry #f))
-           (ctbl-get-entries boxed-ctbl))))
+  (lambda (unboxed-ctbl constant)
+    (if (null? unboxed-ctbl)
+        #f
+    (let ((entries (get-ctbl-entries unboxed-ctbl)))
+      (print_all (list (cons "ctbl not null, ctbl-lookup searching for : " constant) (cons "and entries" entries)))
+      (if (null? entries)
+          #f
+          (ormap (lambda (entry) (if (equal? constant (ctbl-entry-get-constant entry)) entry #f))
+                 entries)
+          )))))
 
-;borrowed
+#;(define print-const-table
+  (lambda()
+    (print_all (list (cons "print ctbl:" get-ctbl) ()))))
+
+  ;(display 'print-const-table_not_inplemented))
+;adds to constant table.
+;[constant_value*entry_value_field -> ctbl_entry]
 (define constant-adder
   (lambda (const data)
-    (let* ((ctbl (unbox const-table))
-           (size (ctbl->size ctbl))
-           (table (ctbl->table ctbl))
-           (entry (ctbl-table-lookup table const)))
-      (if entry
-          entry
-          (let ((new-entry (^ctbl-entry size const data)))
-            (set-box! const-table (^ctbl (+ size (length data)) (cons new-entry table)))
-            new-entry)))))
+    (print_all (list (cons "strtd constant-adder wth: " const)))
+    (let* ((ctbl (get-ctbl))
+           (curr_table (get-ctbl-entries ctbl))
+           (size-ctbl (get-ctbl-size ctbl))
+           (entry-exists (ctbl-lookup curr_table const)))
+      (print_all (list (cons "entry-exists ans: " entry-exists)))
+      (if entry-exists ;if already exist
+          entry-exists ;don't add
+          (let ((new-entry (make-constant-tbl-entry size-ctbl const data))) ;else - add
+            (set-box! constant-tbl (make-ctbl (+ (length data) size-ctbl) (cons new-entry curr_table)))
+            
+            new-entry))))) ;SHOULD NOT RETURN???
 
 
 ;recurssive, adds all constants to table
 (define add-constant-to-table
   (lambda (const-value)
+    (print_all (list (cons "strtd add-constant-to-table wth: " const-value)))
     (if (null? const-value)
-        (make-constant-tbl-entry "SOB_NIL" const `("T_NIL"))
-        (cond 
-          ((boolean? const-value) (if const-value
-                                      'add-true
-                                      'add-false))
-          (else (error "add-constant-to-table" (format "~s" const))))
-          )
-    ;*void-object* 
+        (make-constant-tbl-entry "SOB_NIL" const-value `("T_NIL"))
+        (if (void? const) 
+            (make-constant-tbl-entry "SOB_VOID" const-value `("T_VOID"))
+            (cond 
+              ((number? const-value) (constant-adder const-value `("T_INT" ,const-value)))
+              ((char? const-value) (constant-adder const-value `("T_CHAR" ,(char->integer const-value))))
+              ((string? const-value) (constant-adder const-value
+                                                     `("T_STR" ,(string-length const-value)
+                                                               ,@(map char->integer (string->list const-value)))))
+              ((pair? const-value)
+               (let ((first_el (add-constant-to-table (car const-value)))
+                     (second_el (add-constant-to-table (cdr const-value))))
+                 (constant-adder const-value `("T_PAIR" ,(ctbl-entry-get-address first_el) ,(ctbl-entry-get-address second_el)))))
+              ((symbol? const-value) 
+               (let*((str-rep-entry (add-constant-to-table (symbol->string const-value))) ;first add string to represent symbol name
+                     (new-symbol-entry (constant-adder const-value `("T_SYMBOL" ,(ctbl-entry-get-address str-rep-entry))))) ; Add to constant table
+                 ;*****CHANGE THIS!!!! *********
+                 (symbol-adder const-value new-symbol-entry) ; Add to symbol table 
+                 ;*****CHANGE THIS!!!! *********
+                 new-symbol-entry))
+              
+              ((vector? const-value)  (let ((vec-len (vector-length const-value))
+                                            (vec-list (vector->list const-value)))
+                                        (constant-adder const-value `("T_VEC" ,vec-len ,@(map add-constant-to-table vec-list)))
+                                        ))
+              ((boolean? const-value) (if const-value
+                                          (make-constant-tbl-entry "SOB_TRUE" #t `("T_BOOL" 1))
+                                          (make-constant-tbl-entry "SOB_FALSE" #f `("T_BOOL" 0))))
+              (else (error "add-constant-to-table" (format "~s" const-value))))
+            ))))
+
+;;;;;;;;;symbol table;;;;;;;;
+
+  (define add-to-end-of-lst
+    (lambda (lst elem)
+      (fold-right cons (list elem) lst)))
+  
+(define fix-address-of-before-last
+    (lambda (new-address lst)
+      (let* ((current-el (car lst))
+             (current-el-address (get-symtable-entry-next current-el)))
+        (if(= current-el-address 0)
+           (let ((symb (car current-el))
+                 (symb-address (cadr current-el)))
+             (list symb symb-address new-address))
+           (list (fix-address-of-before-last (cdr lst)))
+           ))))
+
+  ;(symb entry-address 0)
+  
+(define *sym-table-start* 1)
+(define *sym-table-entry-size* 2)
+(define *sym-table-size* 0)
+;Initialization of symbol table.
+(define symbol-table (box '()))
+;get symbol table data
+(define get-symtable-data 
+  (lambda () (unbox symbol-table)))
+   
+(define get-symtable-entry-next caddr)
+(define get-symtable-entry-symb car)
+        
+(define sym-table-lookup
+  (lambda (symb)
+    (let ((unboxed-symtable (get-symtable-data)))
+      (if (null? unboxed-symtable)
+        #f
+        (ormap (lambda (entry) 
+                 (if (equal? symb (get-symtable-entry-symb entry)) 
+                     entry 
+                     #f))
+           unboxed-symtable)
+    ))))
+
+(define symbol-adder
+  (lambda (symb data)
+    (print_all (list (cons "symbol-adder with " symb)))
+    (let ((table (get-symtable-data))
+          (entry-address (ctbl-entry-get-address data)))
+      (if (null? table)
+          (set-box! symbol-table (list (list symb entry-address 0))) ; (symbol next)
+          (let ((sym-exist (sym-table-lookup symb)))
+            (if (not sym-exist)
+                (set-box! symbol-table 
+                          (add-to-end-of-lst (fix-address-of-before-last entry-address table) 
+                                             (list symb entry-address 0)))))
+  ))))
+    
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;fvar table ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define get-fvar-table-start-location (lambda() (get-ctbl-end-address)) )  ;end if constants table
+(define fvar-table (box '())) ;the constant table
+(define get-fvar-table (lambda() (unbox free-var-boxed-list)))
+
+
+(define fvar->name cadr)
+
+(define add-fvar
+  (lambda (var-name)
+    (let ((unboxed-fvars (unbox free-var-boxed-list)))
+      (if (not (assoc var-name unboxed-fvars))
+        (set-box! free-var-boxed-list (cons (list var-name 'undefined) unboxed-fvars)))))) ;'undefined not neccessary????
+
+(define fvar-table-address-builder
+  (lambda(fvar-lst start-address)
+    (letrec ((runner 
+              (lambda (lst address)
+                (if (null? lst)
+                    lst
+                    ;(let((current_el (car lst)))
+                      (cons `(,address ,(caar lst) ,(cadar lst)) 
+                            (runner (cdr lst) (+ 1 address)))
+                   )
+                )))
+      (runner fvar-lst start-address))
     ))
 
-(define build-tables
-  (lambda (pe)
-    (if (or (null? pe) (not (pair? pe)))
-        pe
-        (cond 
-          ((check-type? pe '(fvar)) (display 'add-to-var-table))
-          ((check-type? pe '(const)) (add-constant-to-table (const-exp->value pe)))
-          (else (map build-tables pe))
-          ))
+
+  (define build-tables
+    (lambda (pe)
+      (print_all (list (cons "strtd build-tables wth: " pe)))
+      (if (or (null? pe) (not (pair? pe)))
+          pe
+          (cond 
+            ((check-type? pe '(fvar)) (add-fvar (fvar->name pe)))
+            ((check-type? pe '(const)) (add-constant-to-table (const-exp->value pe)))
+            (else (map build-tables pe))
+            ))
     ;*void-object* 
     ))
-
 
 (define compile-scheme-file 
   (lambda (scheme-source cisc-output) ;gets names of files
@@ -1806,8 +1948,16 @@
       (print_all (list (cons "sexpr after process " sexpr)))
       (let ((parsed-exp (parse sexpr)))
         (let((ready_code (run-ass3 parsed-exp)))
-          (let ((build-tables ready_code))
-            build-tables)
+           ;(print_all (list (cons "ready_code" ready_code)))
+          (let ((ans (build-tables ready_code)))
+            
+            ;(get-ctbl) ; !!!!!!!!!!!!!!~change this~!!!!!!!!!!
+            ;(get-fvar-table)
+            ;(fvar-table-address-builder (get-fvar-table) (get-fvar-table-start-location) )
+            (get-symtable-data)
+           ; ans
+            
+            )
         )))))
 
 (define file->sexpr
@@ -1842,6 +1992,33 @@
                         (cons ch (run)))))))
         ;(list->string
          (run)))));)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;write to file borrowed;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Write to file.
+(define write-file
+  (lambda (text file)
+    (let ((out (open-output-file file 'replace)))
+      (begin
+        (display text out)
+        (close-output-port out)))))
+
+;Holds the file port for writing to the output file
+(define *out-file-port* 0)
+;Opens the output file for writing and saves its port
+(define fopen
+  (lambda (out-file)
+    (set! *out-file-port* (open-output-file out-file 'replace))))
+;Writes to the output file
+(define fwrite
+  (lambda texts
+    (if (not (null? texts))
+        (begin (display (car texts) *out-file-port*)
+               (apply fwrite (cdr texts))))))
+;Closes the output file
+(define fclose
+  (lambda ()
+    (begin
+      (close-output-port *out-file-port*)
+      (set! *out-file-port* 0))))
 
 
       
@@ -1865,6 +2042,53 @@
       ;((check-type? parsed-exp '(define)) (code-gen-define parsed-exp env params depth))
       (else (error "code-gen" (format "~s" parsed-exp))))
     ))
+
+
+;fvars
+(define free-var-boxed-list
+  (box '((cons prim_cons)
+         (boolean? is_boolean)
+         (+ prim_plus)
+         (- prim_minus)
+         (* prim_multiple)
+         (/ prim_quotient)
+         (< prim_less_than)
+         (> prim_greater_than)
+         (<= prim_less_equals)
+         (>= prim_greater_equals)
+         (= prim_numeric_equals)
+         (car prim_car)
+         (cdr prim_cdr)
+         (apply prim_apply)
+         (zero? prim_is_zero)
+         (null? prim_is_null)
+         (number? prim_is_number)
+         (pair? prim_is_pair)
+         (integer? prim_is_integer)
+         (char? prim_is_char)
+         (procedure? prim_is_procedure)
+         (string? prim_is_string)
+         (symbol? prim_is_symbol)
+         (vector? prim_is_vector)
+         (void? prim_is_void)
+         (set-car! prim_set_car)
+         (set-cdr! prim_set_cdr)
+         (string-length prim_string_length)
+         (string-ref prim_string_ref)
+         (string-set! prim_string_set)
+         (char->integer prim_char_to_int)
+         (integer->char prim_int_to_char)
+         (string->list prim_string_to_list)
+         (vector-length prim_vector_length)
+         (vector-ref prim_vector_ref)
+         (vector-set! prim_vector_set)
+         (remainder prim_remainder)
+         (make-vector prim_make_vector)
+         (make-string prim_make_string)
+         (symbol->string prim_symbol_to_string)
+         (string->symbol prim_string_to_symbol)
+         (eq? prim_is_eq)
+         )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;junk-yard;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 		

@@ -1,587 +1,1866 @@
-; Load pattern matcher
 (load "pattern-matcher.scm")
+(load "pc.scm")
+(load "output_functions.scm")
+;(load "otherscompiler.scm")
+;(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\pattern-matcher.scm")
+;(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\pc.scm")
+;;;;; Usage: make-full-code function receives code gen answer and returns full program in string
+;(load "C:\\Users\\Gilad\\Documents\\BGU\\6th\\Compi\\Project\\output_functions.scm")
 
-; -----------------------------------------
-; Required code from assignment description
-; -----------------------------------------
-(print-graph #f) ; display circular structures
-(print-gensym #f) ; print gensym as g1234
-(case-sensitive #f) ; ditto
-(print-brackets #f) ; do not use brackets when pretty-printing
+;from Mayer's tutorial:
+(define <whitespace>
+  (const
+   (lambda (ch)
+     (char<=? ch #\space))))
 
-(revert-interaction-semantics) ; allow builtins to be redefined
+(define <line-comment>
+  (let ((<end-of-line-comment>
+         (new (*parser (char #\newline))
+              (*parser <end-of-input>)
+              (*disj 2)
+              done)))
+    (new (*parser (char #\;))
+         (*parser <any-char>)
+         (*parser <end-of-line-comment>)
+         *diff *star
+         (*parser <end-of-line-comment>)
+         (*caten 3)
+         done)))
 
-;;; fix bug in optimizer
-(#%$sputprop 'append '*flags* 122)
-(#%$sputprop 'append! '*flags* 34)
-(#%$sputprop 'list* '*flags* 1250)
-(#%$sputprop 'cons* '*flags* 1250)
+(define <sexpr-comment>
+  (new (*parser (word "#;"))
+       (*delayed (lambda () <Sexpr>))
+       (*caten 2)
+       done))
 
-;;; And just for good luck :-)
-(define with (lambda (s f) (apply f s)))
+(define <comment>
+  (disj <line-comment>
+        <sexpr-comment>))
 
-; -----------------------------------------
+(define <skip>
+  (disj <comment>
+        <whitespace>))
 
-;;; From: qq.scm
-;;; A naive, one-level quasiquote implementation
-;;;
-;;; Programmer: Mayer Goldberg, 2014
+(define ^^<wrapped>
+  (lambda (<wrapper>)
+    (lambda (<p>)
+      (new (*parser <wrapper>)
+           (*parser <p>)
+           (*parser <wrapper>)
+           (*caten 3)
+           (*pack-with
+            (lambda (_left e _right) e))
+           done))))
 
-;;; expand-qq assumes that you are passing to it the quasiquoted expression
-;;; in other words, the expression without the quasiquote!
-;;;
-;;; Try:
-;;; 
-;;; > (expand-qq '(a b c ,d e f ,@(foo x y) ,g h i j))
-(define expand-qq
-  (lambda (e)
-    (cond ((unquote? e) (cadr e))
-	  ((unquote-splicing? e)
-	   (error 'expand-qq "unquote-splicing here makes no sense!"))
-	  ((pair? e)
-	   (let ((a (car e))
-		 (b (cdr e)))
-	     (cond ((unquote-splicing? a) `(append ,(cadr a) ,(expand-qq b)))
-		   ((unquote-splicing? b) `(cons ,(expand-qq a) ,(cadr b)))
-		   (else `(cons ,(expand-qq a) ,(expand-qq b))))))
-	  ((vector? e) `(list->vector ,(expand-qq (vector->list e))))
-	  ((or (null? e) (symbol? e)) `',e)
-	  (else e))))
+(define ^<skipped*> (^^<wrapped> (star <skip>)))
 
-;; Makes a predicate that checks for a single element list tagged by the given tag.
+;------------------------------------ infix comments---------------------------------------------
+
+
+(define <eat_until_space>
+  (let ((<end-of-line-comment>
+         (new (*parser (char #\newline))
+              (*parser (char #\;))
+              (*parser (word "#;"))
+              (*parser <end-of-input>)
+              (*disj 4)
+              done)))
+    (new 
+     (*parser <any-char>)
+     (*parser <end-of-line-comment>)
+     *diff *star
+     done)))
+
+(define <infix-comment>
+  (new (*parser (word "#;"))
+       ;(*parser <eat_until>)
+       ;(*delayed (lambda () <Sexpr>))
+       ;(*delayed (lambda () <Initial>))
+       ;*diff
+       (*delayed (lambda () <Initial>)) 
+       (*delayed (lambda () <Number>))
+       (*delayed (lambda () <Symbol>))
+       (*delayed (lambda () <String>))
+       ; (*delayed (lambda () <Char>))
+       (*disj 3)
+       *diff
+       (*delayed (lambda () <Sexpr>))
+       
+       ; *diff
+       (*disj 2)
+       (*caten 2)
+       done))
+
+(define <char-comment>
+  (new (*parser (word "#;"))
+       (*delayed (lambda () <Char>))
+       (*caten 2)
+       done))
+
+(define <comment_for_infix>
+  (disj <char-comment>
+        <line-comment>
+        <infix-comment>))
+
+(define <skip_for_infix>
+  (disj <comment_for_infix>
+        <whitespace>))
+
+(define ^<skipped_infix*> (^^<wrapped> (star <skip_for_infix>)))
+
+;------------------------------------ done dealing with whitespace & endline------------------------------------------------------
+
+(define <digit-0-9>
+  (range #\0 #\9))
+
+(define <digit-1-9>
+  (range #\1 #\9))
+
+(define <ValidChar>
+  (range #\! #\~))
+
+(define <a-f_Char>
+  (range-ci #\a #\f))
+
+(define <ci-Char-a-z>
+  (range-ci #\a #\z))
+
+
+(define <Chars-for-SymbolChar>
+  (new (*parser (char #\!))
+       (*parser (char #\$))
+       (*parser (char #\^))
+       (*parser (char #\*))
+       (*parser (char #\-))
+       (*parser (char #\_))
+       (*parser (char #\=))
+       (*parser (char #\+))
+       (*parser (char #\<))
+       (*parser (char #\>))
+       (*parser (char #\?))
+       (*parser (char #\/))
+       (*disj 12)
+       done
+       ))
+
+(define <False>
+  (new (*parser (char #\#))
+       (*parser (char-ci #\f))
+       (*caten 2)
+       (*pack (lambda(_) #f))
+       done))
+
+(define <True>
+  (new (*parser (char #\#))
+       (*parser (char-ci #\t))
+       (*caten 2)
+       (*pack (lambda(_) #t))
+       done))
+
+(define <Boolean>
+  (new (*parser <False>)
+       (*parser <True>)
+       (*disj 2)
+       done))
+
+(define <CharPrefix>
+  (new (*parser (char #\#))
+       (*parser (char #\\))
+       (*caten 2)
+       done))
+
+(define  <VisibleSimpleChar>
+  (^<skipped*>(new
+               (*parser <ValidChar> )
+               done)))
+
+(define  <NamedChar>  
+  (new  (*parser (word-ci "lambda"))
+        (*pack (lambda (_)  (integer->char 955)))
+        (*parser (word-ci "newline"))
+        (*pack (lambda (_)  (integer->char 10)))
+        (*parser (word-ci "nul"))
+        (*pack (lambda (_)  (integer->char 0)))
+        (*parser (word-ci "page"))
+        (*pack (lambda (_) (integer->char 12)))
+        (*parser (word-ci "return"))
+        (*pack (lambda (_) (integer->char 13)))
+        (*parser (word-ci "space"))
+        (*pack (lambda (_) (integer->char 32)))
+        (*parser (word-ci "tab"))
+        (*pack (lambda (_) (integer->char 9)))
+        (*disj 7)
+        done ))
+
+(define <HexChar>
+  (new (*parser <digit-0-9>)
+       (*parser <a-f_Char>)
+       (*disj 2)
+       (*pack (lambda(ch) (char-downcase ch)))
+       done
+       ))
+
+(define  <HexUnicodeChar> 
+  (new
+   (*parser (char-ci #\x))
+   (*parser <HexChar>) *plus
+   (*caten 2)
+   (*pack-with (lambda(x_ch list)          
+                 (integer->char
+                  (string->number
+                   (list->string list) 16))))
+   done))
+
+(define <Char>
+  (^<skipped*>
+   (new (*parser <CharPrefix>)
+        (*parser <NamedChar>)
+        (*parser <HexUnicodeChar>)
+        (*parser <VisibleSimpleChar>) ;case-sensative
+        (*disj 3)
+        (*caten 2)
+        (*pack-with (lambda(chPref ch)
+                      ch))
+        done)))
+
+(define <string-meta-char-from-Mayer>
+  (new (*parser (word "\\\\"))
+       (*pack (lambda (_) #\\))
+       (*parser (word "\\\""))
+       (*pack (lambda (_) #\"))
+       (*disj 2)
+       done))
+
+
+(define <StringLiteralChar>
+  (new (*parser <string-meta-char-from-Mayer>)
+       (*parser <any-char>)
+       (*parser (char #\"))
+       (*parser (char #\\))
+       (*disj 2)
+       *diff
+       (*disj 2)
+       done))
+
+(define <StringMetaChar>
+  (new (*parser (word  "\\\\"))
+       (*pack (lambda(_) "\\"))
+       (*parser (word "\\\""))
+       (*pack (lambda(_) "\""))
+       (*parser (word "\\t"))
+       (*pack (lambda(_) "\t"))
+       (*parser (word "\\f"))
+       (*pack (lambda(_) "\f"))
+       (*parser (word "\\n"))
+       (*pack (lambda(_) "\n"))
+       (*parser (word "\\r"))
+       (*pack (lambda(_) "\r"))
+       (*disj 6)
+       done))
+
+
+(define <StringHexChar>
+  (new (*parser (char #\\))
+       (*parser (char #\x))
+       (*parser <HexChar>) *plus
+       (*caten 3)
+       done))
+
+
+(define <string-meta-char>
+  (new (*parser (word "\\\\"))
+       (*pack (lambda (_) #\\))
+       
+       (*parser (word "\\\""))
+       (*pack (lambda (_) #\"))
+       
+       (*disj 2)
+       done))
+
+(define <StringChar>
+  (new
+   (*parser <string-meta-char>)
+   (*parser <any-char>)
+   (*parser (char #\"))
+   (*parser (char #\\))
+   (*disj 2)
+   
+   *diff
+   (*disj 2)
+   done))
+
+(define <String>  ; removed skipped
+  (^<skipped*>
+   (new
+    (*parser <StringHexChar>)
+    (*parser (char #\"))
+    (*parser <StringChar>) *star
+    (*parser (char #\"))
+    (*caten 3)
+    (*disj 2)
+    (*pack-with (lambda(bra1 str bra2)
+                  (list->string str)))
+    done)))
+
+
+(define <Natural>
+  (new 
+   (*parser (char #\0)) *star
+   (*parser <digit-1-9>)
+   (*parser <digit-0-9>) *star
+   (*caten 3)
+   (*pack-with
+    (lambda (zeros a s)
+      (string->number
+       (list->string
+        `(,a ,@s)))))
+   
+   (*parser (char #\0)) *plus
+   ;(*parser <Chars_no_zero>)
+   ;*not-followed-by
+   (*pack (lambda (_) 0))
+   
+   (*disj 2)
+   
+   done))
+
+(define <Integer>
+  (new (*parser (char #\+))
+       (*parser <Natural>)
+       (*caten 2)
+       (*pack-with
+        (lambda (++ n) n))
+       
+       (*parser (char #\-))
+       (*parser <Natural>)
+       (*caten 2)
+       (*pack-with
+        (lambda (-- n) (- n)))
+       
+       (*parser <Natural>)
+       
+       (*disj 3)
+       
+       done))
+
+(define <Fraction>
+  (new (*parser <Integer>)
+       (*parser (char #\/))
+       (*parser <Natural>)
+       (*guard (lambda (n) (not (zero? n))))
+       (*caten 3)
+       (*pack-with
+        (lambda (num div den)
+          (if (zero? num)
+              0
+              (/ num den))))
+       done))
+
+(define <Number>
+  (new (*parser <Fraction>)
+       (*parser <Integer>)
+       (*disj 2)
+       done))
+
+(define <SymbolChar>
+  (new (*parser <digit-0-9>)
+       (*parser <ci-Char-a-z>)
+       (*parser <Chars-for-SymbolChar>)
+       (*disj 3)
+       (*pack (lambda(ch)
+                (char-downcase ch)))
+       done))
+
+(define <Symbol>
+  (new (*parser <SymbolChar>) *plus
+       (*pack (lambda(x) (string->symbol (list->string x))))
+       done))
+
+
+(define <Numbers_Char_Filter>
+  (^<skipped*>(new (*parser
+                    (not-followed-by <Number> <Symbol>))
+                   done)))
+
+
+(define <open-Bra>
+  (new (*parser (char #\( ))
+       (*pack
+        (lambda(_) #\( ))
+       done))
+
+(define <close-Bra>
+  (new (*parser (char #\) ))
+       (*pack
+        (lambda(_) #\) ))
+       done))
+
+(define <ProperList>
+  (new
+   (*parser <open-Bra> )
+   (*delayed (lambda () <Sexpr> )) *star
+   (*parser <close-Bra> )
+   (*caten 3)
+   (*pack-with
+    (lambda(a exprs c)
+      exprs))
+   done))
+
+
+(define <ImproperList>
+  (new (*parser <open-Bra>)
+       (*delayed (lambda () <Sexpr> ))  *plus
+       (*parser (char #\. ))
+       (*delayed (lambda () <Sexpr> ))
+       (*parser <close-Bra>)
+       (*caten 5)
+       (*pack-with (lambda(a exps c last e)
+                     (fold-right cons last exps)))
+       done))
+
+(define <Vector>
+  (new (*parser (char #\# ))
+       (*parser <open-Bra>)
+       (*delayed (lambda () <Sexpr> )) *star
+       (*parser <close-Bra> )
+       (*caten 4)
+       (*pack-with
+        (lambda(a b sexprs d)
+          (list->vector sexprs)))
+       done))
+
+(define <Quoted>
+  (new (*parser (char #\' ))
+       (*delayed (lambda () <Sexpr>))
+       (*caten 2)
+       (*pack-with
+        (lambda(ch sexp)
+          (list 'quote sexp)))
+       done))
+
+(define <QuasiQuoted>
+  (^<skipped*>
+   (new (*parser (char #\` ))
+        (*delayed (lambda () <Sexpr>))
+        (*caten 2)
+        (*pack-with (lambda(ch sexpr)
+                      (list 'quasiquote sexpr)))
+        done)))
+
+(define <Unquoted>
+  (new (*parser (char #\, ))
+       (*delayed (lambda () <Sexpr>))
+       (*caten 2)
+       (*pack-with (lambda(ch sexpr)
+                     (list 'unquote sexpr)))
+       done))
+
+(define <UnquoteAndSpliced>
+  (new (*parser (char #\, ))
+       (*parser (char #\@ ))
+       (*delayed (lambda () <Sexpr>))
+       (*caten 3)
+       (*pack-with (lambda(ch1 ch2 sexpr)
+                     (list 'unquote-splicing sexpr)))
+       done))
+
+(define <Sexpr> 
+  (^<skipped*>  ;support for comment-line & whitespace 
+   (new
+    (*delayed (lambda () <InfixExtension>))
+    (*parser <Boolean>)
+    (*parser <Char>)
+    (*parser <Numbers_Char_Filter>)
+    (*parser <String>)  
+    (*parser <Symbol>)
+    (*parser <ProperList>)
+    (*parser <ImproperList>)
+    (*parser <Vector>)
+    (*parser <Quoted>)
+    (*parser <QuasiQuoted>)
+    (*parser <Unquoted>)
+    (*parser <UnquoteAndSpliced>)
+    
+    (*disj 13)
+    done
+    )))
+
+(define <InfixPrefixExtensionPrefix>
+  (^<skipped*>(new (*parser (char #\#))
+                   (*parser (char #\#))
+                   (*caten 2)
+                   (*parser (char #\#))
+                   (*parser (char #\%))
+                   (*caten 2)
+                   (*disj 2)
+                   done)))
+
+
+(define <Infix_Prohibited_SymbolList>
+  (new (*parser (char #\+))
+       (*parser (char #\-))
+       (*parser (char #\*))
+       (*parser (char #\*))
+       (*parser (char #\*))
+       (*caten 2)
+       (*parser (char #\^))
+       (*parser (char #\/))
+       (*disj 6)
+       done))
+
+(define <PlusMinusChars>
+  (new (*parser (char #\+))
+       (*parser (char #\-))
+       (*disj 2)
+       done))
+
+(define <MulDivChars>
+  (new (*parser (char #\*))
+       (*parser (char #\/))
+       (*disj 2)
+       done))
+
+(define <PowChars>
+  (new (*parser (char #\^))
+       (*parser (word "**"))
+       (*disj 2)
+       done))
+
+(define <SymbolChar_forInfixSymbol>
+  (new (*parser <digit-0-9>)
+       (*parser <ci-Char-a-z>)
+       (*disj 2)
+       (*pack (lambda(ch)
+                (char-downcase ch)))
+       done))
+
+
+(define <InfixSymbol>
+  (new
+   (*parser <SymbolChar_forInfixSymbol>)
+   (*parser <Infix_Prohibited_SymbolList>)
+   *diff
+   *star
+   (*pack (lambda(sym) 
+            (string->symbol (list->string sym))))
+   done))
+
+(define <InfixNeg>
+  (new (*parser (char #\-))
+       (*delayed (lambda() <Pow_End>))
+       (*caten 2)
+       (*pack-with
+        (lambda(char exp)
+          `(- ,exp)))
+       done))
+
+
+(define <InfixParen>
+  (new (*parser (char #\( ))
+       (*delayed (lambda() <Initial>)) ;*plus
+       (*parser (char #\)))
+       (*caten 3)
+       (*pack-with (lambda(bra1 exp bra2)
+                     exp))
+       done))
+
+(define <InfixArrayGet>
+  (new
+   (*delayed (lambda() <Number>))
+   (*delayed (lambda() <InfixParen>))
+   (*delayed (lambda() <InfixSymbol>))
+   
+   (*disj 3)
+   (*parser  <skip_for_infix>) *star
+   (*parser (char #\[))
+   (*delayed (lambda() <Initial>))
+   (*parser (char #\]))
+   (*parser  <skip_for_infix>) *star
+   (*caten 5)
+   (*pack-with (lambda (startSpace par1 indexList par2 endSpace) (lambda (vec) (list 'vector-ref vec indexList))))
+   *plus
+   (*caten 2)
+   (*pack-with (lambda (vecName func) (fold-left (lambda (acc elment) (elment acc)) vecName func)))
+   done))
+
+
+(define <InfixFuncall>
+  (new 
+   
+   (*delayed (lambda() <Number>))
+   (*delayed (lambda() <InfixParen>))
+   (*delayed (lambda() <InfixNeg>))
+   (*delayed (lambda() <Sexpr>))
+   
+   (*disj 4)
+   (*parser (char #\())
+   
+   (*delayed (lambda() <Initial>))
+   (*parser (char #\,))
+   (*delayed (lambda() <Initial>))
+   (*caten 2)
+   (*pack-with (lambda (com exp) exp))
+   *star
+   (*parser (char #\)))
+   (*caten 5)
+   (*pack-with (lambda(func par1 first args par2)
+                 (cond ((null? first) `(,func))
+                       ((null? args) `(,func ,first))
+                       (else
+                        `(,func ,first ,@args)))))
+   done))
+
+(define <Pow_End>   ;L3
+  (^<skipped_infix*>
+   (new
+    (*delayed (lambda() <InfixSexprEscape>))
+    (*parser  <InfixArrayGet>) ;symbol
+    (*parser  <InfixFuncall>)  ;symbol
+    
+    (*parser <InfixParen>)
+    (*parser <Number>)
+    
+    (*parser <InfixNeg>)
+    (*parser <InfixSymbol>)
+    (*parser <epsilon>)
+    
+    (*disj 8)
+    done)))
+
+(define <MulDiv> ;L2=L3(+L3)*
+  (^<skipped_infix*>
+   (new
+    (*parser <Pow_End>)
+    (*parser <PowChars>)
+    (*delayed (lambda() <MulDiv>))
+    (*parser <Pow_End>)
+    (*disj 2)
+    (*caten 2)
+    (*pack-with (lambda (sign exps)
+                  (lambda (first_element)
+                    `(expt ,first_element ,exps))))
+    *star
+    (*caten 2)
+    (*pack-with (lambda (first_exp lambda_rest_exps)
+                  (fold-left (lambda (acc operator )
+                               (operator acc)) first_exp lambda_rest_exps)))
+    done)))
+
+
+(define <AddSub> ;L1=L2(+L2)*
+  (^<skipped_infix*>
+   (new
+    (*parser <MulDiv>)
+    (*parser <MulDivChars>)
+    (*parser <MulDiv>)
+    (*caten 2)
+    (*pack-with (lambda (sign exps)
+                  (lambda (first_element)
+                    `(,(string->symbol (string sign)) ,first_element ,exps))))
+    *star
+    (*caten 2)
+    (*pack-with (lambda (first_exp lambda_rest_exps)
+                  (fold-left (lambda (operator acc)
+                               (acc operator)) first_exp lambda_rest_exps)))
+    done)))
+
+
+(define <Initial>  ;L0=L1(+L1)*
+  (^<skipped_infix*>
+   (new
+    (*parser <AddSub>)
+    (*parser <PlusMinusChars>)
+    (*parser <AddSub>)
+    (*caten 2)
+    (*pack-with (lambda (sign exps)
+                  (lambda (first_element)
+                    `(,(string->symbol (string sign)) ,first_element ,exps))))
+    *star
+    (*caten 2)
+    (*pack-with (lambda (first_exp lambda_rest_exps)
+                  (fold-left (lambda (operator acc)
+                               (acc operator)) first_exp lambda_rest_exps)))
+    done)))
+
+(define <InfixExtension>
+  (^<skipped_infix*>
+   (new (*parser <InfixPrefixExtensionPrefix>)
+        (*parser <Initial>)
+        (*caten 2)
+        (*pack-with
+         (lambda(pre exp) exp))
+        done)))
+
+
+(define <InfixSexprEscape>
+  (new (*parser <InfixPrefixExtensionPrefix>)
+       (*parser <Sexpr>)
+       (*caten 2)
+       (*pack-with (lambda(pre exp)
+                     exp))
+       done))
+
+
+;Defined by Mayer
+(define *reserved-words*
+  '(and begin cond define do else if lambda
+        let let* letrec or quasiquote unquote
+        unquote-splicing quote set!))
+
+; *** QQ from assignment page ***
+
 (define ^quote?
   (lambda (tag)
     (lambda (e)
       (and (pair? e)
-	   (eq? (car e) tag)
-	   (pair? (cdr e))
-	   (null? (cddr e))))))
+           (eq? (car e) tag)
+           (pair? (cdr e))
+           (null? (cddr e))))))
 
+(define quote? (^quote? 'quote))
 (define unquote? (^quote? 'unquote))
 (define unquote-splicing? (^quote? 'unquote-splicing))
 
+(define const-mayer?
+  (let ((simple-sexprs-predicates
+         (list boolean? char? number? string?)))
+    (lambda (e)
+      (or (ormap (lambda (p?) (p? e))
+                 simple-sexprs-predicates)
+          (quote? e)))))
+
+(define quotify
+  (lambda (e)
+    (if (or (null? e)
+            (pair? e)
+            (symbol? e)
+            (vector? e))
+        `',e
+        e)))
+
+(define unquotify
+  (lambda (e)
+    (if (quote? e)
+        (cadr e)
+        e)))
+
+(define const-pair?
+  (lambda (e)
+    (and (quote? e)
+         (pair? (cadr e)))))
+
+(define expand-qq
+  (letrec ((expand-qq
+            (lambda (e)
+              (cond ((unquote? e) (cadr e))
+                    ((unquote-splicing? e)
+                     (error 'expand-qq
+                            "unquote-splicing here makes no sense!"))
+                    ((pair? e)
+                     (let ((a (car e))
+                           (b (cdr e)))
+                       (cond ((unquote-splicing? a)
+                              `(append ,(cadr a) ,(expand-qq b)))
+                             ((unquote-splicing? b)
+                              `(cons ,(expand-qq a) ,(cadr b)))
+                             (else `(cons ,(expand-qq a) ,(expand-qq b))))))
+                    ((vector? e) `(list->vector ,(expand-qq (vector->list e))))
+                    ((or (null? e) (symbol? e)) `',e)
+                    (else e))))
+           (optimize-qq-expansion (lambda (e) (optimizer e (lambda () e))))
+           (optimizer
+            (compose-patterns
+             (pattern-rule
+              `(append ,(? 'e) '())
+              (lambda (e) (optimize-qq-expansion e)))
+             (pattern-rule
+              `(append ,(? 'c1 const-pair?) (cons ,(? 'c2 const-mayer?) ,(? 'e)))
+              (lambda (c1 c2 e)
+                (let ((c (quotify `(,@(unquotify c1) ,(unquotify c2))))
+                      (e (optimize-qq-expansion e)))
+                  (optimize-qq-expansion `(append ,c ,e)))))
+             (pattern-rule
+              `(append ,(? 'c1 const-pair?) ,(? 'c2 const-pair?))
+              (lambda (c1 c2)
+                (let ((c (quotify (append (unquotify c1) (unquotify c2)))))
+                  c)))
+             (pattern-rule
+              `(append ,(? 'e1) ,(? 'e2))
+              (lambda (e1 e2)
+                (let ((e1 (optimize-qq-expansion e1))
+                      (e2 (optimize-qq-expansion e2)))
+                  `(append ,e1 ,e2))))
+             (pattern-rule
+              `(cons ,(? 'c1 const-mayer?) (cons ,(? 'c2 const-mayer?) ,(? 'e)))
+              (lambda (c1 c2 e)
+                (let ((c (quotify (list (unquotify c1) (unquotify c2))))
+                      (e (optimize-qq-expansion e)))
+                  (optimize-qq-expansion `(append ,c ,e)))))
+             (pattern-rule
+              `(cons ,(? 'e1) ,(? 'e2))
+              (lambda (e1 e2)
+                (let ((e1 (optimize-qq-expansion e1))
+                      (e2 (optimize-qq-expansion e2)))
+                  (if (and (const-mayer? e1) (const-mayer? e2))
+                      (quotify (cons (unquotify e1) (unquotify e2)))
+                      `(cons ,e1 ,e2))))))))
+    (lambda (e)
+      (optimize-qq-expansion
+       (expand-qq e)))))
 
 
-; Void object
-(define *void-object* (if #f #f))
 
-; Simple constant identification procedure
-(define simple-const?
-  (lambda (const)
-    (or (boolean? const)
-        (number? const)
-        (char? const)
-        (string? const))))
+;*** end of QQ ***
 
-; Reserved words for this assignment
-(define *reserved-words*
-  '(and begin cond define do else if lambda
-    let let* letrec or quasiquote unquote 
-    unquote-splicing quote set!))
-
-; Beginify to begin
-(define beginify
+;helper debugger, prints all pair items
+; [List(Pair) -> void]
+(define print_all
   (lambda (lst)
+    (newline)
+    (display (caar lst))
+    (newline)
+    (display (cdar lst))
     (if (null? (cdr lst))
-        (car lst)
-        `(begin ,@lst))))
+        *void-object*
+        (print_all (cdr lst)))))
 
-; Reserved word predicate
-(define reserved?
-  (lambda (sym)
-    (ormap (lambda (word) (eq? word sym))
-           *reserved-words*)))
 
-; Not reserved word?
-(define not-reserved?
-  (lambda (sym)
-    (not (reserved? sym))))
+(define *void-object*  `(const ,(void)))
 
-; Variable predicate
-(define var?
-  (lambda (var)
-    (and (not (simple-const? var))
-         (symbol? var)
-         (not (reserved? var)))))
+(define void? (lambda(var) (eq? var (void))))
 
-; Is it a list of variables?
-(define var-list?
+(define not-resereved-word?
+  (lambda (el)
+    (not (member el *reserved-words*))))
+
+(define variable?
+  (lambda (exp)
+    (and (symbol? exp)
+         (not-resereved-word? exp))))
+
+(define constant?
+  (lambda (exp)
+    (or (eq? (void) exp)
+        (vector? exp)
+        (boolean? exp)
+        (char? exp)
+        (number? exp)
+        (string? exp))))
+
+;; used?
+(define notNumber?
+  (lambda (exp) (or 
+                 (not (number? exp))
+                 (#f))))
+
+;; used?
+(define beginify
+  (lambda (s)
+    (cond
+      ((null? s) *void-object*)
+      ((null? (cdr s)) (car s))
+      (else `(begin ,@s)))))
+
+
+;verify lst is a list >= 2
+(define assignment-list?
   (lambda (lst)
     (and (list? lst)
-         (or (null? lst)
-             (andmap var? lst)))))
-
-; Verify that a value is a list with at least 2 elements
-(define list-length>=2?
-  (lambda (value)
-    (and (list? value)
-         (not (null? value))
-         (not (null? (cdr value))))))
+         (not (null? lst))
+         (not (null? (cdr lst))))))
 
 ; Validate list of let assignments
-(define let-list?
-  (lambda (lst)
-    (if (and (list? lst)
-             (not (null? lst))
-             (andmap (lambda (assignment)
-                       (and (list-length>=2? assignment)
-                            (var? (car assignment))
-                            (null? (cddr assignment))))
-                     lst))
-        #t
-        #f)))
+(define check-let-assign?
+  (lambda (let-lst)
+    (and (not (null? let-lst))
+         (list? let-lst)
+         (andmap (lambda (assign-lst)
+                   (and (assignment-list? assign-lst)
+                        (variable? (car assign-lst))
+                        (null? (cddr assign-lst))))
+                 let-lst))
+    
+    ))
 
-; Dimsnatle a list of two-element lists to two lists:
-; one of the first elements and one of the second
-(define split-car-cadr
+; take a let assignment list, check it and return a list of two lists - vars and values(exprs)
+(define seperate-vars-vals
   (lambda (lst)
-    (if (let-list? lst)
+    (if (check-let-assign? lst)
         (list (map car lst) (map cadr lst))
         #f)))
 
-; Gets an improper list and separates it to a list of all
-; elements except the last, and a list of the last element,
-; while ensuring they are all variables
-(define extract-opt-vars
-  (lambda (val)
-    (letrec ((f (lambda (lst cont fail)
-                  (if (and (pair? lst) (var? (car lst)))
-                      (if (pair? (cdr lst))
-                          (f (cdr lst)
-                             (lambda (args rest)
-                               (cont (cons (car lst) args) rest))
-                             fail)
-                          (if (var? (cdr lst))
-                              (cont (list (car lst)) (cdr lst))
-                              (fail)))
-                      (fail)))))
-      (if (var? val) (list '() val)
-          (f val
-             (lambda (args rest) (list args rest))
-             (lambda () #f))))))
-
-; Applies a procedure on a list of arguments
-(define with (lambda (s f) (apply f s)))
-
-; Expands a letrec expression to a Ym invocation
-(define expand-letrec
-  (lambda (letrec-expr)
-    (with letrec-expr
-      (lambda (ribs . exprs)
-	(let* ((fs (map car ribs))
-	       (lambda-exprs (map cdr ribs))
-	       (nu (gensym))
-	       (nu+fs `(,nu ,@fs))
-	       (body-f `(lambda ,nu+fs ,@exprs))
-	       (hofs
-		(map (lambda (lambda-expr) `(lambda ,nu+fs ,@lambda-expr))
-		  lambda-exprs)))
-	  `(Ym ,body-f ,@hofs))))))
-
-
-; Basic parser - main function
-(define parse
-  (let ((run
-	 (compose-patterns
-          ;; simple-const
-          (pattern-rule
-           (? 'c simple-const?)
-           (lambda (c) `(const ,c)))
-          ;; quote
-          (pattern-rule
-           `(quote ,(? 'c))
-           (lambda (c) `(const ,c)))
-          ;; variable
-          (pattern-rule
-           (? 'v var?)
-           (lambda (v) `(var ,v)))
-          ;; if without alternative
-          (pattern-rule
-           `(if ,(? 'test) ,(? 'dit))
-           (lambda (test dit)
-             `(if3 ,(parse test) ,(parse dit) (const ,*void-object*))))
-          ;; normal if
-          (pattern-rule
-           `(if ,(? 'test) ,(? 'dit) ,(? 'dif))
-           (lambda (test dit dif)
-             `(if3 ,(parse test) ,(parse dit) ,(parse dif))))
-          ;; macro-expander: let* to nested let
-          (pattern-rule
-           `(let* () ,(? 'expr) . ,(? 'exprs list?))
-           (lambda (expr exprs)
-             (parse (beginify (cons expr exprs)))))
-          (pattern-rule
-           `(let* ((,(? 'var var?) ,(? 'val)) . ,(? 'rest)) . ,(? 'exprs))
-           (lambda (var val rest exprs)
-             (parse `(let ((,var ,val))
-                       (let* ,rest . ,exprs)))))
-          ;; sequence - Empty
-          (pattern-rule
-           `(begin)
-           (lambda () `(const ,*void-object*)))
-          ;; sequence - Single
-          (pattern-rule
-           `(begin ,(? 'expr))
-           (lambda (expr)
-             (parse expr))) 
-          ;; sequence - Multiple
-          (pattern-rule
-           `(begin ,(? 'expr) . ,(? 'exprs list?))
-           (lambda (expr exprs)
-             `(seq (,(parse expr) . ,(map parse exprs))))) 
-          ;; simple lambda
-          (pattern-rule
-           `(lambda ,(? 'vars var-list?) ,(? 'expr) . ,(? 'exprs list?))
-           (lambda (vars expr exprs)
-             `(lambda-simple ,vars ,(parse (beginify `(,expr . ,exprs))))))
-          ;; optional arguments lambda
-          (pattern-rule
-           `(lambda (,(? 'var var?) . ,extract-opt-vars) ,(? 'expr) . ,(? 'exprs list?))
-           (lambda (var vars opts expr exprs)
-             `(lambda-opt ,(cons var vars) ,opts ,(parse (beginify `(,expr . ,exprs))))))
-          ;; variadic lambda
-          (pattern-rule
-           `(lambda ,(? 'vars var?) ,(? 'expr) . ,(? 'exprs list?))
-           (lambda (vars expr exprs)
-             `(lambda-variadic ,vars ,(parse (beginify `(,expr . ,exprs))))))
-          ; define
-          (pattern-rule
-           `(define ,(? 'var var?) ,(? 'expr))
-           (lambda (var expr)
-             `(define ,(parse var) ,(parse expr))))
-          ; MIT define
-          (pattern-rule
-           `(define (,(? 'var var?) . ,(? 'vars)) ,(? 'expr) . ,(? 'exprs list?))
-           (lambda (var vars expr exprs)
-             (parse `(define ,var (lambda ,vars ,expr . ,exprs)))))
-          ; Application
-          (pattern-rule
-           `(,(? 'proc not-reserved?) . ,(? 'exprs))
-           (lambda (proc exprs)
-             `(applic ,(parse proc) ,(map parse exprs))))
-          
-          
-          ; --------- Macros ---------
-          
-          ; let: Empty - to application
-          (pattern-rule
-           `(let () ,(? 'expr) . ,(? 'exprs list?))
-           (lambda (expr exprs)
-             (parse `((lambda () ,expr . ,exprs)))))
-          ; let: Not empty - to application
-          (pattern-rule
-           `(let ,split-car-cadr ,(? 'expr) . ,(? 'exprs list?))
-           (lambda (vars values expr exprs)
-             (parse `((lambda ,vars ,expr . ,exprs) . ,values))))
-          
-          ; and: empty
-          (pattern-rule
-           `(and)
-           (lambda ()
-             `,(parse #t)))
-          ; and: Single argument
-          (pattern-rule
-           `(and ,(? 'expr))
-           (lambda (expr)
-             (parse expr)))
-          ; and: Recursive (2 or more arguments) - to if
-          (pattern-rule
-           `(and ,(? 'expr1) ,(? 'expr2) . ,(? 'exprs list?))
-           (lambda (expr1 expr2 exprs)
-             (parse `(if ,expr1 (and ,expr2 . ,exprs) #f))))
-          
-          ; or: empty
-          (pattern-rule
-           `(or)
-           (lambda ()
-             `,(parse #f)))
-          ; or: Single argument
-          (pattern-rule
-           `(or ,(? 'expr))
-           (lambda (expr)
-             (parse expr)))
-          ; or: Two or more arguments
-          (pattern-rule
-           `(or ,(? 'expr1) ,(? 'expr2) . ,(? 'exprs list?))
-           (lambda (expr1 expr2 exprs)
-             `(or ,(map parse `(,expr1 ,expr2 . ,exprs)))))
-          
-          ; cond: Empty - to void
-          (pattern-rule
-           `(cond)
-           (lambda ()
-             `(const ,*void-object*)))
-          ; cond: Else
-          (pattern-rule
-           `(cond (else ,(? 'expr)))
-           (lambda (expr)
-             (parse expr)))
-          ; cond: General - to if
-          (pattern-rule
-           `(cond ,(? 'clause list-length>=2?) . ,(? 'clauses list?))
-           (lambda (clause clauses)
-             (parse `(if ,(car clause)
-                         ,(beginify (cdr clause))
-                         (cond . ,clauses)))))
-          
-          ; letrec
-          (pattern-rule
-           `(letrec . ,expand-letrec)
-           (lambda expanded
-             (parse expanded)))
-          
-          ; quasiquote
-          (pattern-rule
-           (cons 'quasiquote expand-qq)
-           (lambda expanded
-             `(parse ,expanded)))
-          
-          )))
-    (lambda (e)
-      (run e
-           (lambda ()
-             (error 'parse
-                    (format "I can't recognize this: ~s" e)))))))
-
-;predicate for lambda expression.
-(define lambda?
-  (lambda (pe)
-    (and (list? pe)
-         (not (null? pe))
-         (or (eq? (car pe) 'lambda-simple)
-             (eq? (car pe) 'lambda-opt)
-             (eq? (car pe) 'lambda-variadic)))))
-
-;Extract the vars from a lambda.
-(define lambda->vars
-  (lambda (pe)
-    (cond ((eq? (car pe) 'lambda-simple) (cadr pe))
-          ((eq? (car pe) 'lambda-opt) (append (cadr pe) (list (caddr pe))))
-          ((eq? (car pe) 'lambda-variadic) (list (cadr pe)))
-          (else '()))))
-
-;Searches the index of expression e inside a list lst
-(define list-index
-  (lambda (e lst)
-    (if (null? lst)
-        -1
-        (if (eq? (car lst) e)
-            0
-            (let ((index (list-index e (cdr lst))))
-              (if (= index -1) 
-                  -1
-                  (add1 index)))))))
-
-;Annotates variable to be either fvar or bvar according to the result of member procedure. 
-(define annotate-bvar
-  (lambda (var vars major)
-    (cond ((null? vars) `(fvar ,var))
-          ((member var (car vars)) `(bvar ,var ,major ,(list-index var (car vars))))
-          (else (annotate-bvar var (cdr vars) (add1 major))))))
-
-;Extracts the name of a bvar.
-(define bvar->name
-  (lambda (bvar)
-    (cadr bvar)))
-
-;Extracts the major index of a bvar.
-(define bvar->major
-  (lambda (bvar)
-    (caddr bvar)))
-
-;Extracts the minor index of a bvar.
-(define bvar->minor
-  (lambda (bvar)
-    (cadddr bvar)))
-
-;Annotate var to be fvar, pvar or bvar.
-(define annotate-var
-  (lambda (var vars)
-    (cond ((null? vars) `(fvar ,var))
-          ((member var (car vars)) `(pvar ,var ,(list-index var (car vars))))
-          (else (annotate-bvar var (cdr vars) 0)))))
-
-;Extracts the name of a pvar.
-(define pvar->name
-  (lambda (pvar)
-    (cadr pvar)))
-
-;Extracts the minor index of a pvar.
-(define pvar->minor
-  (lambda (pvar)
-    (caddr pvar)))
-
-;Extracts the name of a fvar.
-(define fvar->name
-  (lambda (fvar)
-    (cadr fvar)))
-
-;Annotates variables in the given expression based on
-;the list of lists of variables that represents the
-;environment
-(define aux-pe->lex-pe
-  (lambda (pe vars)
-    (cond ((not (pair? pe)) pe)
-          ((eq? (car pe) 'var) (annotate-var (cadr pe) vars))
-          ((lambda? pe)
-           (let* ((new-vars (cons (lambda->vars pe) vars))
-                  (recursive-call (lambda (x) (aux-pe->lex-pe x new-vars))))
-             (map recursive-call pe)))
-          ((not (list? (cdr pe))) pe)
-          (else (map (lambda (pe) (aux-pe->lex-pe pe vars)) pe)))
+(define identify-lambda
+  (lambda (argl ret-simple ret-opt ret-var)
+    (cond 
+      ((null? argl) (ret-simple '()))
+      ((variable? argl) (ret-var argl))      
+      (else (identify-lambda (cdr argl)
+                             (lambda (s) (ret-simple `(,(car argl) ,@s))) 
+                             (lambda (s opt) (ret-opt `(,(car argl) ,@s) opt))
+                             (lambda (var) (ret-opt `(,(car argl)) var)))))
     ))
 
-;Wrapper for aux-pe->lex-pe
+
+(define and-macro-exp
+  (lambda (expr) 
+    (if (not (null? (cdr expr)))
+        `(if ,(car expr),(and-macro-exp (cdr expr)) #f)
+        (car expr))))
+
+(define cond-macro-exp
+  (lambda (seq) 
+    (if (not (null? (cdr seq))) 
+        `(if ,(caar seq) (begin ,@(cdar seq)) ,(cond-macro-exp (cdr seq)))
+        (if (eq? (caar seq) 'else) 
+            `(begin ,@(cdar seq))
+            `(if ,(caar seq) (begin ,@(cdar seq)))))))
+
+(define (flatten x)
+  (cond ((null? x) '())
+        ((pair? x) (append (flatten (car x)) (flatten (cdr x))))
+        (else (list x))))
+
+(define new-beginning
+  (lambda (seq)
+    (display (map
+              (lambda (exp)
+                (if (list? exp) 
+                    (if (eq? (car exp) 'begin) 
+                        (cdr exp)
+                        exp)
+                    exp))
+              seq)))) 
+
+
+(define letToApplic
+  (lambda (listOfPairs body bodies)
+    (let ((vars (car (seperate-vars-vals listOfPairs)))
+          (vals (cadr (seperate-vars-vals listOfPairs))))
+      `((lambda ,vars ,body ,@bodies) ,@vals)
+      )))
+
+(define let-star-To-Applic
+  (lambda (listOfPairs body bodies)
+    (let ((vars (car (seperate-vars-vals listOfPairs)))
+          (vals (cadr (seperate-vars-vals listOfPairs))))
+      (let ((first_var (car vars))
+            (first_val (car vals))
+            (rest_vars (cdr vars))
+            (rest_vals (cdr vals)))
+        (let ((first-hasama (list(list first_var first_val)))
+              (rest_hasamot (cdr listOfPairs)))
+          (if (null? rest_hasamot)
+              `(let ,first-hasama ,body ,@bodies)
+              (let ((next_ans `(let* ,rest_hasamot ,body ,@bodies)))
+                `(let ,first-hasama ,next_ans))
+              ))))))
+
+(define letrecToApplic
+  (lambda(listOfPairs body bodies)
+    (let ((vars (car (seperate-vars-vals listOfPairs)))
+          (vals (cadr (seperate-vars-vals listOfPairs))))
+      (let ((all_init_sets (map (lambda (var) `(,var #f)) vars))
+            (all_set_bodies (map (lambda(var val) `(set! ,var ,val)) vars vals))
+            (final_rest_bodies `(let () ,body ,@bodies)))
+        (let((begin_final `(,@all_set_bodies ,final_rest_bodies)));)
+          (let ((ans `(let ,all_init_sets ,@begin_final )))
+            ans
+            ))))))
+
+(define check-seq? 
+  (lambda (exp) 
+    (equal? (car exp) 'seq)))
+
+(define filter_let_bodies
+  (lambda (bodies)
+    (if(null? bodies)
+       '()
+       (let ((first (car bodies))
+             (rest (cdr bodies)))
+         (if (list? first)
+             (if (check-seq? first)
+                 (let ((no-seq-exp (cadr first)))
+                   (let ((first_filtered (filter_let_bodies no-seq-exp)))
+                     (fold-right cons  (filter_let_bodies rest) first_filtered) 
+                     ))
+                 (cons first (filter_let_bodies rest))
+                 )
+             (cons first (filter_let_bodies rest)); 'not-list-cannot-be-seq
+             )
+         )
+       )
+    ))
+
+
+(define flat-begin
+  (lambda(body bodies)
+    (let ((all_bodies (cons body bodies)))
+      (let ((unfiltered_ans `(seq ,@(map tag-parse all_bodies))))
+        (let ((filtered_ans (filter_let_bodies (cdr unfiltered_ans))))
+          `(seq ,filtered_ans)
+          )
+        )
+      )))
+
+(define tag-parse
+  (let ((run
+         (compose-patterns
+          ;constants
+          (pattern-rule
+           (? 'el constant?)
+           (lambda(el) `(const ,el)))
+          ;quote
+          (pattern-rule
+           `(quote ,(? 'el)) ;no guards - returns list
+           (lambda(el) `(const ,el)))
+          ;symbol
+          (pattern-rule
+           (? 'el variable?)
+           (lambda(el) `(var ,el)))
+          
+          ;if
+          (pattern-rule
+           `(if
+             ,(? 'pred)
+             ,(? 'conequence)
+             ,(? 'alternative))
+           (lambda (pred consequence alternative)
+             `(if3 ,(tag-parse pred) ,(tag-parse consequence) ,(tag-parse alternative))))
+          ;if-no-consequence
+          (pattern-rule
+           `(if ,(? 'pred) ,(? 'conseq))
+           (lambda(pred conseq) `(if3 ,(tag-parse pred) ,(tag-parse conseq) ,*void-object*)))
+          ;empty or
+          (pattern-rule
+           `(or)
+           (lambda() `,(tag-parse #f)))
+          ;or 1 element
+          (pattern-rule
+           `(or ,(? 'el))
+           (lambda(el) (tag-parse el)))
+          ;or
+          (pattern-rule
+           `(or ,(? 'first) ,(? 'second) . ,(? 'rest list?)) ;list? checks if there are any more params
+           (lambda(first second rest) `(or ,(map tag-parse `(,first ,second . ,rest)))))
+          
+          ;set!
+          (pattern-rule
+           `(set! ,(? 'first) ,(? 'rest))
+           (lambda (first rest)
+             `(set ,(tag-parse first) ,(tag-parse rest))))
+          
+          ;let*
+          (pattern-rule 
+           `(let* ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
+           (lambda (listOfPairs body bodies)
+             (if (null? listOfPairs)
+                 (tag-parse `((lambda () ,body ,@bodies))) 
+                 (tag-parse (let-star-To-Applic listOfPairs body bodies))
+                 )))
+          
+          ; let
+          (pattern-rule 
+           `(let ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
+           (lambda (listOfPairs body bodies)
+             (if (null? listOfPairs)
+                 (tag-parse `((lambda () ,body ,@bodies)))
+                 (tag-parse (letToApplic listOfPairs body bodies)))
+             ))
+          
+          ;letrec 
+          (pattern-rule 
+           `(letrec ,(? 'listOfPairs) ,(? 'body) . ,(? 'bodies))
+           (lambda (listOfPairs body bodies)
+             (if (null? listOfPairs)
+                 (tag-parse `((lambda () ((lambda () ,(beginify (cons body bodies))) ,@listOfPairs)) ,@listOfPairs))
+                 (tag-parse
+                  (letrecToApplic listOfPairs body bodies))
+                 )))
+          
+          ;and-macro-exp
+          (pattern-rule 
+           `(and .,(? 'andExp))
+           (lambda (andExp)
+             (if (null? andExp)
+                 (tag-parse '#t)
+                 (tag-parse(and-macro-exp andExp)))
+             ))
+          
+          ;cond-macro-exp
+          (pattern-rule 
+           `(cond .,(? 'condExp))
+           (lambda (condExp)
+             (tag-parse (cond-macro-exp condExp))
+             ))
+          ;lambda
+          (pattern-rule
+           `(lambda ,(? 'argl) ,(? 'body) . ,(? 'rest))
+           (lambda (argl body rest)
+             (if (null? rest) 
+                 `(,@(identify-lambda argl (lambda (s) `(lambda-simple ,s)) 
+                                      (lambda (s opt) `(lambda-opt ,s,opt)) 
+                                      (lambda (var) `(lambda-var ,var)))
+                   ,(tag-parse body))
+                 ;else
+                 `(,@(identify-lambda argl (lambda (s) `(lambda-simple ,s)) 
+                                      (lambda (s opt) `(lambda-opt ,s,opt)) 
+                                      (lambda (var) `(lambda-var ,var)))
+                   ;,(tag-parse `(begin ,body ,@rest))))
+                   (seq (,(tag-parse body) ,@(map tag-parse rest)))))
+             ))
+          
+          ;Regular\MIT-style define
+          (pattern-rule 
+           `(define
+              ,(? 'first) ,(? 'body) . ,(? 'rest))
+           (lambda (first body rest)
+             (if (not (variable? first))
+                 (if (null? rest)
+                     `(def ,(tag-parse (car first)) 
+                        ,(tag-parse `(lambda ,(cdr first) ,body)))
+                     ;else
+                     `(def ,(tag-parse (car first)) 
+                        ,(tag-parse `(lambda ,(cdr first) ,body ,(car rest))))) 
+                 ;else
+                 `(def ,(tag-parse first) ,(tag-parse body) ,@(map tag-parse rest)))
+             ))
+          
+          (pattern-rule 
+           `(begin ,(? 'sequance) . ,(? 'rest))
+           (lambda (sequance rest)
+             (if (null? rest)
+                 (tag-parse sequance)
+                 (flat-begin sequance rest)
+                 )))
+          
+          ;empty begin
+          (pattern-rule 
+           `(begin)
+           (lambda()*void-object*))
+          
+          ;qq
+          (pattern-rule 
+           `(,'quasiquote ,(? 'arg))
+           (lambda (arg) (tag-parse (expand-qq arg))
+             ))
+          
+          ;Application with arguments 
+          (pattern-rule
+           `( ,(? 'func not-resereved-word?)  . ,(? 'args) )
+           (lambda (func args) `(applic ,(tag-parse func) ,(map tag-parse args))))
+          
+          )))
+    
+    (lambda (sexpr)
+      (run sexpr (lambda () `(cannot match input  ,sexpr ))))))
+
+(define parse tag-parse)
+
+(define isLambda?
+  (let ((run
+         (compose-patterns
+          (pattern-rule 
+           `(lambda-simple ,(? 'argl) ,(? 'body) . ,(? 'rest))
+           (lambda (argl body rest) #t))
+          (pattern-rule 
+           `(lambda-opt ,(? 'argl) ,(? 'body) . ,(? 'rest))
+           (lambda (argl body rest)  #t)) 
+          (pattern-rule 
+           `(lambda-var ,(? 'argl) ,(? 'body) . ,(? 'rest))
+           (lambda (argl body rest) #t)))))
+    (lambda (sexpr)
+      (run sexpr (lambda () #f)))
+    ))
+
+(define isDef?
+  (let ((run 
+         (compose-patterns
+          (pattern-rule
+           `(def ,(? 'var) ,(? 'definition))
+           (lambda (var definition) #t)))))
+    (lambda (sexpr)
+      (run sexpr (lambda () #f)))) 
+  
+  
+  )
+
+(define suspectLambda
+  (lambda (lambdaExp) 
+    (let
+        
+        ((lambdaSym (car lambdaExp))
+         (lambdaArgs (cadr lambdaExp))
+         (lambdaBody (caddr lambdaExp)))
+      (letrec ((defList (list))
+               (loop (lambda (lambdaBody)
+                       (cond 
+                         ((null? lambdaBody) (list))
+                         ((isLambda? lambdaBody) (cons lambdaSym (cons lambdaArgs (eliminate-nested-defines lambdaBody))))
+                         ((equal? 'seq (car lambdaBody)) `(,@(cons lambdaSym (cons lambdaArgs `((seq ,(loop (cadr lambdaBody))))))))
+                         ((isDef? (car lambdaBody)) (begin (set! defList (append defList `(,(cdar lambdaBody))))
+                                                           (loop (cdr lambdaBody))))
+                         ((null? defList) (eliminate-nested-defines lambdaBody))
+                         (else
+                          
+                          (let* ((init_sets (map (lambda (exp) (list 'const #f)) defList))
+                                 (set_bodies (map (lambda (exp) `(set ,(car exp) ,(eliminate-nested-defines (cadr exp)))) 
+                                                  defList)) 
+                                 (defArgs (map (lambda (exp) (cadar exp)) defList))
+                                 (body  `(seq (,@set_bodies ,(eliminate-nested-defines (car lambdaBody)) ,@(cdr lambdaBody)))))
+                            `( (applic (lambda-simple ,defArgs ,body) ,init_sets))))
+                         )
+                       )
+                     ))
+        (loop lambdaBody)))
+    
+    
+    
+    ))
+
+
+(define eliminate-nested-defines
+  (lambda (exp)
+    (letrec 
+        ((rec (lambda (newExp)
+                (cond 
+                  ((not (list? newExp)) newExp)
+                  ((null? newExp) (list))
+                  ((isLambda? newExp) (suspectLambda newExp))
+                  (else 
+                   
+                   (cons (rec (car newExp)) (rec (cdr newExp))))))))
+      (rec exp))
+    
+    ))
+
+(define isVar?
+  (lambda (exp) (equal? 'var (car exp)))
+  )
+
+(define checkLex
+  (lambda (exp argsList) 
+    (letrec ((minor 0) (major -1) (exists #f) (arg (cadr exp))
+                       (loop (lambda (argsList2)
+                               (if (null? argsList2) `(fvar ,arg)
+                                   (if (null? (car argsList2)) (begin (set! major (+ major 1)) 
+                                                                      (loop (cdr argsList2))) 
+                                       (map (lambda (exp) 
+                                              
+                                              (if (equal? exp arg) (set! exists #t)
+                                                  (if (not exists) (set! minor (+ minor 1))))) (car argsList2))))
+                               (if (and exists (= major -1)) `(pvar ,arg ,minor)  
+                                   (if exists `(bvar ,arg ,major ,minor ) 
+                                       (begin (set! major (+ major 1)) 
+                                              (set! minor 0)
+                                              (if (null? argsList2) `(fvar ,arg) (loop (cdr argsList2)))))) 
+                               ))
+                       
+                       ) (loop argsList))
+    ))
+
 (define pe->lex-pe
-  (lambda (pe)
-    (aux-pe->lex-pe pe '())))
+  (lambda (exp) 
+    (letrec ((rec (lambda (newExp argsList)
+                    (cond ((not (list? newExp)) newExp)
+                          ((null? newExp) (list))
+                          ((and (isVar? newExp) (null? argsList)) `(fvar ,(cadr newExp)))
+                          ((isLambda? newExp) (begin (set! argsList (append `(,(cadr newExp)) argsList)) 
+                                                     (cons (rec (car newExp) argsList) (rec (cdr newExp) argsList))))
+                          ((and (isVar? newExp) (not (null? argsList))) (checkLex newExp argsList))
+                          (else (cons (rec (car newExp) argsList) (rec (cdr newExp) argsList)))
+                          
+                          ))))
+      
+      (rec exp (list)))
+    ))
 
 
-; ---------------------
-; Annotating Tail Calls
-; ---------------------
+(define cut
+  (lambda (exp)
+    (letrec
+        ((helper (lambda (list1 list2)
+                   (if (null? (cdr list1))
+                       list2
+                       (helper (cdr list1) (append list2 (list (car list1))))))))
+      (helper exp '()))))
 
-;Type checking predicate.
-(define type?
-  (lambda (pe tag)
-    (and (pair? pe)
-         (eq? tag (car pe)))))
+(define last
+  (lambda (exp)
+    (if (null? (cdr exp))
+        (car exp)
+        (last (cdr exp)))))
 
-;Checks whether pe's type is one of "tags".
-(define one-of-types?
-  (lambda (pe tags)
-    (and (pair? pe)
-         (let ((first (car pe)))
-           (ormap (lambda (tag) (eq? first tag)) tags)))))
+(define handleLambda
+  (lambda (exp)
+    (let ((first (car exp)) 
+          (second (cadr exp))
+          (third (caddr exp)) 
+          (fourth (caddr exp)))
+      (if (equal? first 'lambda-opt)
+          `(,first ,second ,third ,(helper fourth #t))
+          `(,first ,second ,(helper third #t))))
+    ))
 
-;Getter: procedure out of application.
-(define applic->proc
-  (lambda (pe)
-    (cadr pe)))
-;Getter: arguments out of application.
-(define applic->args
-  (lambda (pe)
-    (caddr pe)))
+(define handleApplic
+  (lambda (exp tp)
+    (let ((first (cadr exp))
+          (second (caddr exp)))
+      (if (equal? #t tp)
+          `(tc-applic ,(helper first #f) ,(map (lambda (expr) (helper expr #f)) second))
+          `(applic ,(helper first #f) ,(map (lambda (expr) (helper expr #f)) second))))
+    
+    ))
 
-;Getter: test out of if.
-(define if->test
-  (lambda (pe)
-    (cadr pe)))
-;Getter: do-if-true out of if.
-(define if->dit
-  (lambda (pe)
-    (caddr pe)))
-;Getter: do-if-false out of if.
-(define if->dif
-  (lambda (pe)
-    (cadddr pe)))
+(define handleSeqOr
+  (lambda (exp tp)
+    (let ((first (car exp))
+          (second (cadr exp)))
+      `(,first (,@(append (map (lambda (expr) (helper expr #f)) (cut second))) ,(helper (last second) tp))))
+    
+    ))
 
-;Splits the whole list apart from the last member of it.
-(define split-all-last
-  (lambda (pe)
-    (if (null? pe)
-        pe
-        (let ((ep (reverse pe)))
-          (list (reverse (cdr ep)) (car ep))))))
+(define handleIf
+  (lambda (exp tp) 
+    (let ((first (cadr exp))
+          (second (caddr exp))
+          (third (cadddr exp)))
+      `(if3 ,(helper first #f)
+            ,(helper second tp)
+            ,(helper third tp)))
+    )
+  )
 
-;Getter: var out of define.
-(define define->var
-  (lambda (pe)
-    (cadr pe)))
-;Getter: body out of define.
-(define define->body
-  (lambda (pe)
-    (caddr pe)))
-
-;Getter: body out of sequence.
-(define seq->body
-  (lambda (pe)
-    (cadr pe)))
-
-;Getter: body out of lambda.
-(define lambda->body
-  (lambda (pe)
-    (cond ((eq? (car pe) 'lambda-simple) (caddr pe))
-          ((eq? (car pe) 'lambda-opt) (cadddr pe))
-          ((eq? (car pe) 'lambda-variadic) (caddr pe))
-          (else '()))))
-;Replaces the body inside a lambda.
-(define replace-lambda-body
-  (lambda (pe new-body)
-    (cond ((eq? (car pe) 'lambda-simple) (list (car pe) (cadr pe) new-body))
-          ((eq? (car pe) 'lambda-opt) (list (car pe) (cadr pe) (caddr pe) new-body))
-          ((eq? (car pe) 'lambda-variadic) (list (car pe) (cadr pe) new-body))
-          (else '()))))
-
-;Annotates tc to be false.
-(define aux-annotate-tc-false
-  (lambda (pe)
-    (aux-annotate-tc pe #f)))
-
-;Annotates tc-applic for all types in all cases.
-(define aux-annotate-tc
-  (lambda (pe in-tp?)
+(define helper
+  (lambda (exp tp)
     (cond
-      ((one-of-types? pe '(const var fvar bvar pvar)) pe)
-      ((type? pe 'if3) `(if3 ,(aux-annotate-tc (if->test pe) #f)
-                             ,(aux-annotate-tc (if->dit pe) in-tp?)
-                             ,(aux-annotate-tc (if->dif pe) in-tp?)))
-      ((type? pe 'or)
-       (let ((or-parts (split-all-last (or->body pe))))
-         `(or ,(append (map aux-annotate-tc-false (car or-parts))
-                       (list (aux-annotate-tc (cadr or-parts) in-tp?))))))
-      ((type? pe 'define) `(define ,(define->var pe) ,(aux-annotate-tc (define->body pe) #f)))
-      ((type? pe 'seq)
-       (let ((seq-parts (split-all-last (seq->body pe))))
-         `(seq ,(append (map aux-annotate-tc-false (car seq-parts))
-                        (list (aux-annotate-tc (cadr seq-parts) in-tp?))))))
-      ((lambda? pe)
-       (replace-lambda-body pe (aux-annotate-tc (lambda->body pe) #t)))
-      ((type? pe 'applic)
-       (let ((proc (applic->proc pe))
-             (args (applic->args pe)))
-         (let ((new-proc (aux-annotate-tc proc #f))
-               (new-args (map aux-annotate-tc-false args)))
-           (if in-tp?
-               `(tc-applic ,new-proc
-                           ,new-args)
-               `(applic ,new-proc
-                        ,new-args)))))
-      (else pe))
-       ))
+      ((isLambda? exp) (handleLambda exp))
+      ((equal? (car exp) 'box-set) `(box-set ,(cadr exp) ,(helper (caddr exp) #f)))
+      ((equal? (car exp) 'if3) (handleIf exp tp))
+      ((equal? (car exp) 'applic) (handleApplic exp tp))
+      ((equal? (car exp) 'set) `(set ,(cadr exp) ,(helper (caddr exp) #f)))
+      ((or (equal? (car exp) 'seq) (equal? (car exp) 'or)) (handleSeqOr exp tp))  
+      ((or (isVar?  exp) (equal? (car exp) 'const) (not (list? exp))) exp)
+      ((isDef? exp) `(def ,(cadr exp) ,(helper (caddr exp) #f)))  
+      (else exp))))
 
-;Annotates tc-applic - main application.
+
 (define annotate-tc
-  (lambda (pe)
-    (aux-annotate-tc pe #f)))
+  (lambda (exp)
+    (print_all (list (cons "entered annotate-tc with " exp)))
+    (helper exp #f)))
 
 
-; ---------------------------------------------------------------------- ;
-; ------------------------ Final Project Code -------------------------- ;
-; ---------------------------------------------------------------------- ;
+(define check-empty-lambda? 
+  (lambda (exp)
+    (if (or (not(list? exp)) (list?(car exp)) (not (equal? (car exp) 'applic)) (null?(cdr exp)) (not (list?(cadr exp))) (null? (cadr exp)) (null? (caadr exp)) (not (equal? (caadr exp) 'lambda-simple))  );(null? (caddr exp))) 
+        #f
+        (let ((op (car exp))
+              (first_exp (caadr exp))
+              (params? (cadadr exp)))
+          (and (equal? op 'applic) (equal? first_exp 'lambda-simple) (equal? (list) params?))
+          ))))
 
-;Same as map, but activates the given function on the
-;elements of the given list *in the order they appear*.
-(define rmap
+(define runCheckEmptyLambda
+  (lambda(exp)
+    (if(or (null? exp) (not (list? exp)))
+       exp
+       (if (check-empty-lambda? exp)
+           (car(runCheckEmptyLambda (cddadr exp))) ;remove on bodies of lambda
+           (let ((first (car exp))
+                 (rest (cdr exp)))
+             ;(print_all (list (cons "first" first) (cons "rest" rest)))
+             (if (list? first)
+                 (let((first_no_empty_lamda (runCheckEmptyLambda first)))
+                   ;(print_all (list (cons "first_no_empty_lamda" first_no_empty_lamda)))
+                   (cons first_no_empty_lamda (runCheckEmptyLambda rest))
+                   )  
+                 (cons first (runCheckEmptyLambda rest))))
+           ))
+    ))
+
+(define remove-applic-lambda-nil
+  (lambda(exp)
+    (runCheckEmptyLambda exp)))
+
+
+(define lambda_names '(lambda-simple lambda-var lambda-opt))
+(define var_names '(var)) 
+
+(define member?
+  (lambda(el lst)
+    (if (or (null? lst) (null? el))
+        #f
+        (let ((first (car lst))
+              (rest (cdr lst)))
+          (if (equal? first el)
+              #t
+              (member? el rest)))))) ;)
+
+;recieves exp and list of types, checks if exp is one of those types
+;[exp*List(types) -> Boolean ]
+(define check-type? 
+  (lambda (exp type)
+    (let ((first (car exp)))
+      (member? first type))
+    ))
+
+
+
+;--------------------------------------- box-set ---------------------------------------------
+
+(define box-base-cases?
+  (lambda(exp)
+    (or (null? exp) (not(list? exp)) (check-type? exp '(const)) (check-type? exp var_names))
+    ))
+
+
+(define get-var-of-set
+  (lambda(set_exp)
+    (let ((ans (cadadr set_exp)))
+      ;(print_all (list (cons "get-var-of-set ans" ans)))
+      ans
+      )
+    ))
+
+(define get-seq-or-bodies 
+  (lambda(seq_exp)
+    ;(print_all (list (cons "get-seq-or-bodies  ans to " seq_exp) (cons "is" (cadr seq_exp))))
+    (cadr seq_exp)
+    ))
+
+(define get-or-bodies 
+  (lambda(or_exp)
+    ;(print_all (list (cons "get-seq-or-bodies  ans to " or_exp) (cons "is" (cdr or_exp))))
+    (cdr or_exp)
+    ))
+
+(define get-lamb-bodies
+  (lambda(lamb_exp)
+    (if (equal? (car lamb_exp) 'lambda-opt) 
+        (cdddr lamb_exp)
+        (cddr lamb_exp))))
+
+;checks if exp is a set expression and if the var is the pvar we are looking for
+(define check-set-var 
+  (lambda (exp pvar)
+    ;(print_all (list (cons "entered check-set-var with exp" exp) (cons "and pvar" pvar)))
+    (if (or (null? exp) (not (= 3 (length exp))))
+        #f
+        (if (check-type? exp '(set))
+            (equal? (get-var-of-set exp) pvar)
+            #f ))))
+
+;(if3 or applic)
+(define check-box-inside-if-or 
+  (lambda (if_or_exp)
+    ;(print_all (list (cons "entered check-box-inside-if-or with " if_or_exp)))
+    (let ((command (car if_or_exp))
+          (all_exps (cdr if_or_exp)))
+      ; (print_all (list (cons "command" command) (cons "all_exps" all_exps)))
+      (if (check-type? if_or_exp '(applic))
+          (box-run all_exps)
+          (let ((ans
+                 (if (check-type? if_or_exp '(or))
+                     `(,command ,@(map box-run all_exps))
+                     `(,command ,@(map box-run all_exps))))) ;check if we need to run this for pred (i think we do)
+            ;(print_all (list (cons "ans-to-check-box-inside-if-or " ans)))
+            ans
+            )))
+    ))
+
+(define check-box-inside-set-def
+  (lambda (def_set_exp)
+    (let (;(command (car def_set_exp))
+          ;(var (cadr def_set_exp))
+          (value (caddr def_set_exp)))
+      ;(print_all(list (cons "entered check-box-inside-set-def (from box-run) w/bodies of def/set value" value)))
+      (box-run value))))
+
+(define has-set-helper-check-lambda
+  (lambda(lamb_exp pvar)
+    (let((lamb_type (car lamb_exp))
+         (lamb_pvars (cond((equal? (car lamb_exp) 'lambda-var) (list(cadr lamb_exp)))
+                          ((equal? (car lamb_exp) 'lambda-opt) (flatten (cons (cadr lamb_exp) (caddr lamb_exp))))
+                          (else (cadr lamb_exp))))
+         (lamb_bodies (get-lamb-bodies lamb_exp)))
+      (if (member? pvar lamb_pvars)
+          #f
+          (ormap (lambda(body) (has-set? body pvar)) lamb_bodies))
+      )))
+
+(define has-bvar-helper-check-lambda
+  (lambda(lamb_exp var)
+    (let((lamb_type (car lamb_exp))
+         (lamb_pvars (cond((equal? (car lamb_exp) 'lambda-var) (list(cadr lamb_exp)))
+                          ((equal? (car lamb_exp) 'lambda-opt) (flatten (cons (cadr lamb_exp) (caddr lamb_exp))))
+                          (else (cadr lamb_exp))))
+         (lamb_bodies (get-lamb-bodies lamb_exp)))
+      (if (member? var lamb_pvars)
+          #f
+          (ormap (lambda(body) (or (has-pvar? body var) 
+                                   (if(check-type? body lambda_names)
+                                      (has-bvar-helper-check-lambda body var)
+                                      (has-bvar? body var))
+                                   )) lamb_bodies)
+          ))
+    ))
+
+(define has-bvar?
+  (lambda(exp var)
+    ;(print_all (list (cons "entered has-bpvar? with exp " exp) (cons "var" var) ))
+    (if(null? exp)
+       #f
+       (let ((has-bvar-ans 
+              (cond 
+                ((check-type? exp '(seq or)) (ormap (lambda(body) (has-bvar? body var)) (get-seq-or-bodies exp))) ;check if seq, check all bodies 
+                ((check-type? exp '(if3)) (ormap (lambda(el) (has-bvar? el var )) (cdr exp))) ;check pred seq alt
+                ((check-type? exp '(applic)) (ormap (lambda(el) (has-bvar? el var )) (cdr exp)))
+                ((check-type? exp '(set)) (ormap (lambda(el) (has-bvar? el var )) (cddr exp)))
+                ((check-type? exp lambda_names) (has-bvar-helper-check-lambda exp var))
+                ((list? (car exp))  ; --> work them one by one 
+                 (let ((first-body-ans (has-bvar? (car exp) var ))
+                       (ans-of-rest (has-bvar? (cdr exp) var )))
+                   (or first-body-ans ans-of-rest)))
+                (else #f)
+                )))
+         ;(print_all (list (cons "has-pvar?-ans is:" has-bvar-ans)))
+         has-bvar-ans
+         )
+       )
+    ))
+
+;receives body of lambda and var to look for , returns boolean
+;def exps do not get here, they stop at box-run
+(define has-set?
+  (lambda(exp pvar)
+    ;(print_all (list (cons "entered has-set? with exp:" exp) (cons "and pvar" pvar)))
+    (if(null? exp)
+       #f
+       (let ((has-set-ans 
+              (cond 
+                ((check-type? exp '(seq or)) (ormap (lambda(body) (has-set? body pvar)) (get-seq-or-bodies exp))) ;check if seq, check all bodies 
+                ((check-type? exp '(if3)) (ormap (lambda(el) (has-set? el pvar)) (cdr exp))) ;check pred seq alt
+                ((check-type? exp '(applic)) (ormap (lambda(el) (has-set? el pvar)) (cdr exp)))
+                ((check-type? exp lambda_names) (has-set-helper-check-lambda exp pvar))
+                ((not (list? (car exp))) (check-set-var exp pvar));if only one exp in body -> work on it , const,var,set,
+                (else ; --> work them one by one ;cannot happen? the function that sends here works them 1-by-1
+                 (let ((first-body-ans (has-set? (car exp) pvar))
+                       (ans-of-rest (has-set? (cdr exp) pvar)))
+                   (or first-body-ans ans-of-rest))))))
+         ;(print_all (list (cons "has-set-ans is:" has-set-ans)))
+         has-set-ans
+         )
+       )))
+
+(define has-pvar?
+  (lambda(exp var)
+    ;(print_all (list (cons "entered has-bpvar? with exp " exp) (cons "var" var) ))
+    (if(null? exp)
+       #f
+       (let ((has-pvar-ans 
+              (cond 
+                ((check-type? exp '(seq or)) (ormap (lambda(body) (has-pvar? body var)) (get-seq-or-bodies exp))) ;check or, seq, check all bodies 
+                ((check-type? exp '(if3 applic)) (ormap (lambda(el) (has-pvar? el var )) (cdr exp))) ;check bodies
+                ((check-type? exp '(set)) (ormap (lambda(el) (has-pvar? el var )) (cddr exp)))
+                ((check-type? exp lambda_names) #f)
+                ((not (list? (car exp))) (equal? exp (list 'var var)));if only one exp in body -> check it , const,var,
+                (else ; --> work them one by one 
+                 (let ((first-body-ans (has-pvar? (car exp) var ))
+                       (ans-of-rest (has-pvar? (cdr exp) var )))
+                   (or first-body-ans ans-of-rest))))))
+         ;(print_all (list (cons "has-pvar?-ans is:" has-pvar-ans)))
+         has-pvar-ans
+         )
+       )
+    ))
+
+(define boxit-helper-check-lambda
+  (lambda(lamb_exp var)
+    (let((lamb_type (car lamb_exp))
+         (lamb_pvars (cadr lamb_exp))
+         (flattened_lamb_pvars  (cond((equal? (car lamb_exp) 'lambda-var) (list(cadr lamb_exp)))
+                                     ((equal? (car lamb_exp) 'lambda-opt) (flatten (cons (cadr lamb_exp) (caddr lamb_exp))))
+                                     (else (cadr lamb_exp))))
+         (lamb_bodies (get-lamb-bodies lamb_exp)))
+      (let((boxit-lambda-ans 
+            (if (member? var flattened_lamb_pvars)
+                lamb_exp
+                (if (equal? lamb_type 'lambda-opt) ;if lamb opt add optional variable to ans
+                    `(,lamb_type ,lamb_pvars ,(caddr lamb_exp)  ,@(map (lambda(body) (box-t-mf-pvar body var)) lamb_bodies))
+                    `(,lamb_type ,lamb_pvars ,@(map (lambda(body) (box-t-mf-pvar body var)) lamb_bodies)))
+                
+                )))
+        ;(print_all (list (cons "boxit-helper-check-lambda ans is " boxit-lambda-ans)))
+        boxit-lambda-ans
+        ))))
+
+(define box-t-mf-pvar
+  (lambda(exp var)
+    ;(print_all (list (cons "entered box-t-mf-pvar with exp " exp) (cons "var" var) ))
+    (if(or (null? exp) (not (list? exp)))
+       exp
+       (let ((ans
+              (cond 
+                ((check-type? exp '(box-get)) exp)
+                ((check-type? exp '(box-set)) `(box-set ,(cadr exp) ,(box-t-mf-pvar (caddr exp) var)))
+                ((check-type? exp '(or)) `(or ,@(map (lambda(body) (box-t-mf-pvar body var)) (get-or-bodies exp)))) ;check if seq, check all bodies 
+                ((check-type? exp '(seq)) `(seq ,(map (lambda(body) (box-t-mf-pvar body var)) (get-seq-or-bodies exp)))) ;check if seq, check all bodies 
+                ((check-type? exp '(if3)) `(if3 ,@(map (lambda(el) (box-t-mf-pvar el var )) (cdr exp)))) ;check pred seq alt
+                ((check-type? exp '(applic)) `(applic ,@(map (lambda(el) (box-t-mf-pvar el var )) (cdr exp))))
+                ((check-type? exp '(set)) (if (equal? (cadr exp) (list 'var var))
+                                              `(box-set (var ,var) ,(caddr exp) )
+                                              `(set (var ,(get-var-of-set exp)) ,@(map (lambda(el) (box-t-mf-pvar el var )) (cddr exp)))))
+                ((check-type? exp lambda_names) (boxit-helper-check-lambda exp var))
+                ((and(not (list? (car exp))) (equal? exp (list 'var var))) `(box-get (var ,var)));if only one exp in body -> check it , const,var,
+                (else ; --> work them one by one 
+                 (if (symbol? (car exp))
+                     exp
+                     (let ((first-body-ans (box-t-mf-pvar (car exp) var ))
+                           (ans-of-rest (box-t-mf-pvar (cdr exp) var )))
+                       (if(null? ans-of-rest)
+                          `(,first-body-ans)
+                          (cons first-body-ans ans-of-rest))))))))
+         ; (print_all (list (cons "box-t-mf-pvar ans is:" ans)))
+         ans))
+    ))
+
+(define build-set-seq
+  (lambda (pvars)
+    (map (lambda(pvar) `(set (var ,pvar) (box (var ,pvar)))) pvars)
+    ))
+
+;receives lambda expression, if pvars are null runs box-run on all bodies , 
+;else check if pvars need to be boxed
+(define box-lambda
+  (lambda(lamb_exp)
+    ;(display "entered box-lambda") (newline)
+    (let ((lamb_type (car lamb_exp))
+          (lamb_pvars  (cadr lamb_exp))
+          (lamb_bodies (get-lamb-bodies lamb_exp)))
+      ; (print_all (list (cons "lamb_type" lamb_type) (cons "lamb_pvars" lamb_pvars)(cons "lamb_bodies" lamb_bodies) ))
+      (let ((boxed_inner_bodies (box-run lamb_bodies)))
+        (if (null? lamb_pvars)
+            `(,lamb_type ,lamb_pvars ,@boxed_inner_bodies) ;no pvars, nothing to box. run box-run on all bodies
+            ;else pvars not null
+            (let ((flattend_pvars 
+                   (cond
+                     ((equal? lamb_type 'lambda-var) (list(cadr lamb_exp)))
+                     ((equal? lamb_type 'lambda-opt) (flatten (cons (cadr lamb_exp) (caddr lamb_exp))))
+                     (else lamb_pvars)) ;case of lamb-simple
+                   ))
+              ;  (print_all (list (cons "flattend_pvars" flattend_pvars)))
+              (let ((pvars-to-box ;holds a list of 
+                     (filter (lambda(x) (not(equal? x #f))) 
+                             (map (lambda (pvar)
+                                    (let ((ans_pvar_need_box  (and (has-set? boxed_inner_bodies pvar)  (has-bvar? boxed_inner_bodies pvar ))))
+                                      ;   (print_all (list (cons "ans_pvar_need_box of " pvar) (cons "is" ans_pvar_need_box)))
+                                      (if ans_pvar_need_box
+                                          pvar
+                                          #f
+                                          )))
+                                  flattend_pvars
+                                  ))))
+                ;(print_all (list (cons "pvars to box are" pvars-to-box)))
+                (letrec((boxer (lambda(bodies pvars2box)
+                                 (if(null? pvars2box)
+                                    bodies
+                                    (if (list? (car pvars2box))
+                                        (boxer bodies (car pvars2box)) ;for opt,var lambdas
+                                        (let ((bodies_after_first_pvar_box 
+                                               (box-t-mf-pvar bodies (car pvars2box))))
+                                          ;(print_all (list (cons "bodies_after_first_pvar_box" bodies_after_first_pvar_box)))
+                                          (boxer bodies_after_first_pvar_box (cdr pvars2box)))
+                                        )
+                                    ))))
+                  (if (null? pvars-to-box);no need to box anything
+                      (if (equal? lamb_type 'lambda-opt)
+                          `(,lamb_type ,lamb_pvars ,(caddr lamb_exp) ,@boxed_inner_bodies)
+                          `(,lamb_type ,lamb_pvars ,@boxed_inner_bodies))
+                      (let ((set-seq (build-set-seq pvars-to-box))
+                            (final_all_pvars_boxed_bodies (boxer boxed_inner_bodies pvars-to-box)));(boxer lamb_bodies pvars-to-box)))
+                        ;(print_all (list(cons "set-seq" set-seq) (cons "final_all_pvars_boxed_bodies" final_all_pvars_boxed_bodies)))
+                        (begin (cond ((check-type? final_all_pvars_boxed_bodies '(seq)) ;remove first inner seq
+                                      (set! final_all_pvars_boxed_bodies (cdr final_all_pvars_boxed_bodies)))
+                                     ((and (null? (cdr final_all_pvars_boxed_bodies)) (check-type? (car final_all_pvars_boxed_bodies) '(seq)))
+                                      (set! final_all_pvars_boxed_bodies (cadar final_all_pvars_boxed_bodies))))
+                               (let ((folded_bodies (fold-right cons  final_all_pvars_boxed_bodies set-seq)))
+                                 ; (print_all (list (cons "folded_bodies" folded_bodies)))
+                                 (if (equal? lamb_type 'lambda-opt) ;if lamb opt add optional variable to ans
+                                     `(,lamb_type ,lamb_pvars ,(caddr lamb_exp) (seq ,folded_bodies ))
+                                     `(,lamb_type ,lamb_pvars (seq ,folded_bodies )))))))
+                  ))
+              ))
+        ))))
+
+;run on general expression (that can consist of other expressions)
+(define box-run
+  (lambda(exp)
+    ;(print_all (list (cons "box-run on exp:" exp)))
+    (cond ((box-base-cases? exp) exp) ;  base cases: const , all var types , 
+          ((check-type? exp '(if3 or)) (check-box-inside-if-or exp)) ;case: if3 ,or
+          ((check-type? exp '(applic)) `(applic ,@(check-box-inside-if-or exp)))
+          ((check-type? exp '(set def)) `(,(car exp) ,(cadr exp) ,(check-box-inside-set-def exp))) ;case: set,def
+          ((check-type? exp lambda_names) (box-lambda exp)) ; lambda case
+          ((check-type? exp '(seq)) `(seq ,(map (lambda(body) (box-run body)) (get-seq-or-bodies exp))))
+          (else ;cases: mulitple expressions(list of expressions, like bodies of seq)
+           (let ((first_exp (car exp))
+                 (rest_exps (cdr exp)))
+             ;(print_all (list (cons "first_exp" first_exp) (cons "rest_exps" rest_exps)))
+             (cons (box-run first_exp) (box-run rest_exps))))
+          )
+    ))
+
+;runner
+(define box-set
+  (lambda(exp)
+    (let ((ans (box-run exp)))
+      ans)
+    ))                         
+
+(define op
+  (lambda(exp) (annotate-tc (pe->lex-pe (box-set (remove-applic-lambda-nil (eliminate-nested-defines exp)))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Project;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(define orderMap
   (lambda (func lst)
     (if (null? lst)
         lst
         (let* ((first (func (car lst)))
-               (rest (rmap func (cdr lst))))
+               (rest (orderMap func (cdr lst))))
           (cons first rest)))))
 
-;Takes a file and converts it's strings to be sexprs.
-(define file->sexprs
-  (lambda (filename)
-    (let ((input (open-input-file filename)))
-      (letrec ((run
-                (lambda ()
-                  (let ((e (read input)))
-                    (if (eof-object? e)
-                        (begin (close-input-port input)
-                               '())
-                        (cons e (run)))))))
-        (run)))))
+(define run-ass3
+  (lambda (pe)
+    ;(annotate-tc 
+    (pe->lex-pe (box-set (remove-applic-lambda-nil (eliminate-nested-defines pe))))));)
+
+
+;;;;getters;;;;;;;;
+(define const-exp->value cadr)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Tables;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;constant table ;;;;;;;;;
+(define *ctbl-start-location* 7) ;start location for constants
+(define *init-ctbl* '()) ;initial value of constant table
+(define make-ctbl cons) ;(lambda (tbl-size tbl) (cons tbl-size tbl))) == cons ; constant table maker
+(define constant-tbl (box (make-ctbl *ctbl-start-location* *init-ctbl*))) ;the constant table
+(define get-ctbl (lambda() (unbox constant-tbl)))
+;getters ctbl
+(define get-ctbl-size car);(lambda (ctbl) (car (unbox ctbl))))
+(define get-ctbl-entries cdr);(lambda (ctbl) (cdr (unbox ctbl)))) 
+(define get-ctbl-end-address (lambda () (get-ctbl-size (get-ctbl))))
+;ctbl entries
+(define make-constant-tbl-entry
+  (lambda (address constant memory-rep)
+    (list address constant memory-rep)))
+;getters for entries
+(define ctbl-entry-get-address  car)
+(define ctbl-entry-get-constant  cadr)
+(define ctbl-entry-get-memory-rep  caddr)
+(define ctbl-entry-get-address  car)
+
+(define ctbl-lookup
+  (lambda (unboxed-ctbl constant)
+    (if (null? unboxed-ctbl)
+        #f
+        (let ((entries (get-ctbl-entries unboxed-ctbl)))
+          (print_all (list (cons "ctbl not null, ctbl-lookup searching for : " constant) (cons "and entries" entries)))
+          (if (null? entries)
+              #f
+              (ormap (lambda (entry) (if (equal? constant (ctbl-entry-get-constant entry)) entry #f))
+                     entries)
+              )))))
+
+(define ctbl-lookup-address
+  (lambda (constant)
+     (let ((entries (get-ctbl-entries (get-ctbl))))
+       (letrec ((runner
+                (lambda (entries)
+                  (if (null? entries) ;this should never happen!! delete at production
+                      "error: ctbl-lookup-address: constant doesn't exist in code. You should not be here. code-gen error"
+                      (let ((first (car entries))
+                            (rest (cdr entries)))
+                        (if (equal?  (ctbl-entry-get-constant first) constant)
+                            (ctbl-entry-get-address first)
+                            (runner rest))
+                        )))
+                ))
+        (runner entries))              
+          )))
+
+;(display 'print-const-table_not_inplemented))
+;adds to constant table.
+;[constant_value*entry_value_field -> ctbl_entry]
+(define constant-adder
+  (lambda (const data)
+    (print_all (list (cons "strtd constant-adder wth: " const)))
+    (let* ((ctbl (get-ctbl))
+           (curr_table (get-ctbl-entries ctbl))
+           (size-ctbl (get-ctbl-size ctbl))
+           (entry-exists (ctbl-lookup curr_table const)))
+      (print_all (list (cons "entry-exists ans: " entry-exists)))
+      (if entry-exists ;if already exist
+          entry-exists ;don't add
+          (let ((new-entry (make-constant-tbl-entry size-ctbl const data))) ;else - add
+            (set-box! constant-tbl (make-ctbl (+ (length data) size-ctbl) (cons new-entry curr_table)))
+            
+            new-entry))))) ;SHOULD NOT RETURN???
+
+
+;recurssive, adds all constants to table
+(define add-constant-to-table
+  (lambda (const-value)
+    (print_all (list (cons "strtd add-constant-to-table wth: " const-value)))
+    (if (null? const-value)
+        (make-constant-tbl-entry "SOB_NIL" const-value `("T_NIL"))
+        (if (void? const) 
+            (make-constant-tbl-entry "SOB_VOID" const-value `("T_VOID"))
+            (cond 
+              ((number? const-value) (constant-adder const-value `("T_INTEGER" ,const-value)))
+              ((char? const-value) (constant-adder const-value `("T_CHAR" ,(char->integer const-value))))
+              ((string? const-value) (constant-adder const-value
+                                                     `("T_STR" ,(string-length const-value)
+                                                               ,@(map char->integer (string->list const-value)))))
+              ((pair? const-value)
+               (let ((first_el (add-constant-to-table (car const-value)))
+                     (second_el (add-constant-to-table (cdr const-value))))
+                 (constant-adder const-value `("T_PAIR" ,(ctbl-entry-get-address first_el) ,(ctbl-entry-get-address second_el)))))
+              ((symbol? const-value) 
+               (let*((str-rep-entry (add-constant-to-table (symbol->string const-value))) ;first add string to represent symbol name
+                     (new-symbol-entry (constant-adder const-value `("T_SYMBOL" ,(ctbl-entry-get-address str-rep-entry))))) ; Add to constant table
+                 ;*****CHANGE THIS!!!! *********
+                 (symbol-adder const-value new-symbol-entry) ; Add to symbol table 
+                 ;*****CHANGE THIS!!!! *********
+                 new-symbol-entry))
+              
+              ((vector? const-value)  (let ((vec-len (vector-length const-value))
+                                            (vec-list (vector->list const-value)))
+                                        (constant-adder const-value `("T_VEC" ,vec-len ,@(map add-constant-to-table vec-list)))
+                                        ))
+              ((boolean? const-value) (if const-value
+                                          (make-constant-tbl-entry "SOB_TRUE" #t `("T_BOOL" 1))
+                                          (make-constant-tbl-entry "SOB_FALSE" #f `("T_BOOL" 0))))
+              (else (error "add-constant-to-table" (format "~s" const-value))))
+            ))))
+
+
+;     ctbl-entry-get-memory-rep
+(define define-const-table-cisc
+  (lambda ()
+    (let* ((entries (get-ctbl-entries(get-ctbl)))
+           (all-data (apply append (reverse (map ctbl-entry-get-memory-rep entries))))
+           (data-string (map (lambda (value) (string-append (to-string value) ", ")) all-data)))
+      ;(document
+      (string-append "long const_table[] = { " (apply string-append data-string) "};") )));)
 
 ;To-string.
 (define to-string
@@ -590,1203 +1869,201 @@
         c
         (format "~s" c))))
 
-;Getter: value out of const.
-(define const->value
-  (lambda (pe)
-    (cadr pe)))
-
-;Make-label to be "name" with increasing counter.
-(define ^^label
-  (lambda (name)
-    (let ((n 0))
-      (lambda ()
-        (set! n (+ n 1))
-        (string-append name
-                       (number->string n))))))
-
-;All the label makers of which our compiler makes use
-(define ^label-if3else (^^label "Lif3else"))
-(define ^label-if3exit (^^label "Lif3exit"))
-(define ^label-lambda-simple-code (^^label "Llambda_simp_code"))
-(define ^label-lambda-simple-exit (^^label "Llambda_simp_exit"))
-(define ^label-lambda-opt-code (^^label "Llambda_opt_code"))
-(define ^label-lambda-opt-exit (^^label "Llambda_opt_exit"))
-(define ^label-lambda-opt-stackcopy-loop (^^label "Llambda_opt_stackcopy_loop"))
-(define ^label-lambda-opt-stackcopy-exit (^^label "Llambda_opt_stackcopy_exit"))
-(define ^label-lambda-var-code (^^label "Llambda_var_code"))
-(define ^label-lambda-var-exit (^^label "Llambda_var_exit"))
-(define ^label-lambda-var-stackcopy-loop (^^label "Llambda_var_stackcopy_loop"))
-(define ^label-lambda-var-stackcopy-exit (^^label "Llambda_var_stackcopy_exit"))
-(define ^label-lambda-envext-simple-firstloop (^^label "Llambda_envext_simple_firstloop"))
-(define ^label-lambda-envext-simple-firstloop-end (^^label "Llambda_envext_simple_firstloop_end"))
-(define ^label-lambda-envext-simple-secondloop (^^label "Llambda_envext_simple_secondloop"))
-(define ^label-lambda-envext-simple-secondloop-end (^^label "Llambda_envext_simple_secondloop_end"))
-(define ^label-lambda-envext-opt-firstloop (^^label "Llambda_envext_opt_firstloop"))
-(define ^label-lambda-envext-opt-firstloop-end (^^label "Llambda_envext_opt_firstloop_end"))
-(define ^label-lambda-envext-opt-secondloop (^^label "Llambda_envext_opt_secondloop"))
-(define ^label-lambda-envext-opt-secondloop-end (^^label "Llambda_envext_opt_secondloop_end"))
-(define ^label-lambda-envext-var-firstloop (^^label "Llambda_envext_var_firstloop"))
-(define ^label-lambda-envext-var-firstloop-end (^^label "Llambda_envext_var_firstloop_end"))
-(define ^label-lambda-envext-var-secondloop (^^label "Llambda_envext_var_secondloop"))
-(define ^label-lambda-envext-var-secondloop-end (^^label "Llambda_envext_var_secondloop_end"))
-(define ^label-tc-applic-loop (^^label "Ltc_applic_loop"))
-(define ^label-tc-applic-exit (^^label "Ltc_applic_exit"))
-
-(define ^label-or-exit (^^label "Lor_exit"))
-;Newline.
-(define nl (list->string (list #\newline)))
-;Void predicate
-(define void?
-  (lambda (e)
-    (eq? *void-object* e)))
-
-;Getter: name out of var.
-(define var->name
-  (lambda (var)
-    (cadr var)))
-
-;Adding comments at the beginning and at the end of a code.
-(define document
-  (lambda (depth code . comment)
-    (let ((comment-string (apply string-append
-                                 (map to-string comment))))
-      (string-append (indent depth)
-                     "/* "
-                     comment-string
-                     " */" nl
-                     code
-                     (indent depth) "/* End of "
-                     comment-string
-                     " */" nl))))
-
-;Creates documentation strings from the given Scheme elements of a comment
-(define ^doc
-  (lambda (depth . comment)
-    (let ((comment-string (apply string-append
-                                 (map to-string comment))))
-      (cons
-       (string-append (indent depth) "/* " comment-string " */" nl)
-       (string-append (indent depth) "/* End of " comment-string " */" nl)))))
-;Gets the part of the documentation that goes before the code
-(define doc->pre car)
-;Gets the part of the documentation that goes after the code
-(define doc->post cdr)
-
-
-; Deals with code indentation.
-(define ^indentation
-  (lambda (depth)
-    (if (zero? depth)
-        ""
-        (string-append "\t" (^indentation (sub1 depth))))))
-; Allows tracing line number during execution if set to #t
-; here and the TRACE_LINES macro constant is defined in gcc
-(define *trace-lines* #f)
-(define indent
-  (lambda (depth)
-    (if *trace-lines*
-        (string-append "DEBUG\t" (^indentation depth))
-        (^indentation depth))))
-
-; Allows for a quick change between full or fast environment simulation
-(define env-extension-type car)
-
-;Extends a given environment.
-(define extend-env
-  (let* ((full (lambda (env vars) (cons vars env)))
-         (fast (lambda (env vars) (add1 env)))
-         (options `(,full ,fast)))
-    (env-extension-type options)))
-
-;Creates new environment.
-(define new-env
-  (let* ((full (lambda () '()))
-         (fast (lambda () 0))
-         (options `(,full ,fast)))
-    (env-extension-type options)))
-(define new-params new-env)
-
-;Getter: environment size.
-(define env-size
-  (let* ((full (lambda (env) (length env)))
-         (fast (lambda (env) env))
-         (options `(,full ,fast)))
-    (env-extension-type options)))
-(define params-size env-size)
-
-;Predicate: is the environment empty?
-(define env-empty?
-  (let* ((full null?)
-         (fast zero?)
-         (options `(,full ,fast)))
-    (env-extension-type options)))
-
-;Code-gen for sequence expression.
-(define code-gen-seq
-  (lambda (pe env params depth)
-    (let* ((doc (^doc depth "Sequence: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc)))
-      (begin
-        (fwrite pre-doc)
-        (rmap (lambda (pe)
-                (code-gen pe env params (add1 depth)))
-              (seq->body pe))
-        (fwrite post-doc)
-        ))))
-
-;Code-gen for if expression.
-(define code-gen-if3
-  (lambda (e env params depth)
-    (with e
-          (lambda (if3 test do-if-true do-if-false)
-            (let* ((depth+1 (add1 depth))
-                   (-> (indent depth+1))
-                   (doc (^doc depth "If: " e))
-                   (pre-doc (doc->pre doc))
-                   (post-doc (doc->post doc))
-                   (label-else (^label-if3else))
-                   (label-exit (^label-if3exit)))
-              (begin
-                (fwrite pre-doc)
-                (code-gen test env params depth+1) ; when run, the result of the test will be in R0
-                (fwrite -> "CMP(R0, SOB_FALSE);" nl)
-                (fwrite -> "JUMP_EQ(" label-else ")" nl)
-                (code-gen do-if-true env params depth+1)
-                (fwrite -> "JUMP(" label-exit ")" nl)
-                (fwrite -> label-else ":" nl)
-                (code-gen do-if-false env params depth+1)
-                (fwrite -> label-exit ":" nl)
-                (fwrite post-doc)
-                ))))))
-
-;Code-gen for const.
-(define code-gen-const
-  (lambda (pe env params depth)
-    (let ((value (const->value pe)))
-      (fwrite
-       (document depth
-                 (string-append
-                  (indent depth) "MOV(R0, "
-                  (cond ((void? value) "IMM(SOB_VOID)")
-                        ((null? value) "IMM(SOB_NIL)")
-                        ((eq? value #f) "IMM(SOB_FALSE)")
-                        ((eq? value #t) "IMM(SOB_TRUE)")
-                        (else (let ((entry (ctbl-lookup value)))
-                                (if entry
-                                    (string-append "IMM(" (to-string (ctbl-entry->addr entry)) ")")
-                                    (error "code-gen-const" "Unknown constant")))))
-                  ");"
-                  nl)
-                 "Constant: " pe)))))
-
-;Code-gen for free vars.
-(define code-gen-fvar
-  (lambda (pe env params depth)
-    (let ((name (var->name pe)))
-      (fwrite
-       (document depth
-                 (string-append (indent depth)
-                                "MOV(R0, IMM("
-                                (let ((entry (ftbl-lookup name)))
-                                  (if entry
-                                      (to-string (ftbl-entry->addr entry))
-                                      (error "code-gen-fvar" "Unknown free variable")))
-                                "));" nl
-                                (indent depth)
-                                "MOV(R0, IND(R0));" nl)
-                 "Free var: " name)))))
-
-;Code-gen for application.
-(define code-gen-applic
-  (lambda (pe env params depth)
-    (let* ((args (applic->args pe))
-           (proc (applic->proc pe))
-           (m (length args))
-           (doc (^doc depth "Applic: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (-> (indent (add1 depth))))
-      (begin
-        (fwrite pre-doc)
-        (fwrite -> "PUSH(IMM(SOB_NIL));" nl)
-        (rmap (lambda (pe)
-                (begin
-                  (code-gen pe env params (add1 depth))
-                  (fwrite -> "PUSH(R0);" nl)))
-              (reverse args))
-        (fwrite -> "PUSH(" (to-string (add1 m)) ");" nl)
-        (code-gen proc env params (add1 depth))
-        (fwrite -> "CMP(IND(R0), T_CLOSURE);" nl)
-        (fwrite -> "JUMP_NE(Lnot_proc);" nl)
-        (fwrite -> "PUSH(INDD(R0, 1));" nl)
-        (fwrite -> "CALLA(INDD(R0, 2));" nl)
-        (fwrite -> "DROP(2 + STARG(0));" nl)
-      (fwrite post-doc)          
-      ))))
-
-;Code-gen for environment extension.
-(define code-gen-env-extension
-  (lambda (env params depth code-label exit-label first-loop-label first-loop-label-end second-loop-label second-loop-label-end)
-    (let* ((> (indent depth))
-           (-> (string-append > "\t")))
-      (begin
-       (fwrite -> "PUSH(IMM(" (to-string (add1 (env-size env))) "));" nl)
-       (fwrite -> "CALL(MALLOC);" nl)
-       (fwrite -> "DROP(1);" nl)
-       (fwrite -> "MOV(R1, R0); /* New environment */" nl)
-       (fwrite -> "MOV(R2, " (if (env-empty? env) "0" "FPARG(0)") "); /* Old environment */" nl)
-       (fwrite -> "/* Copy the existing environment */" nl)
-       (fwrite -> "MOV(R4, 0);" nl)
-       (fwrite -> "MOV(R5, 1);" nl)
-       (fwrite > first-loop-label ":" nl)
-       (fwrite -> "CMP(R4, IMM(" (to-string (env-size env)) "));" nl)
-       (fwrite -> "JUMP_GE(" first-loop-label-end ");" nl)
-       (fwrite -> "MOV(INDD(R1, R5), INDD(R2, R4));" nl)
-       (fwrite -> "INCR(R4);" nl)
-       (fwrite -> "INCR(R5);" nl)
-       (fwrite -> "JUMP(" first-loop-label ");" nl)
-       (fwrite > first-loop-label-end ":" nl)
-       (fwrite -> "/* Extend the copied environment with the current parameters */" nl)
-       (fwrite -> "PUSH(IMM(" (to-string (params-size params)) "));" nl)
-       (fwrite -> "CALL(MALLOC);" nl)
-       (fwrite -> "DROP(1);" nl)
-       (fwrite -> "MOV(R3, R0);" nl)
-       (fwrite -> "MOV(R4, 0);" nl)
-       (fwrite > second-loop-label ":" nl)
-       (fwrite -> "CMP(R4, IMM(" (to-string (params-size params)) "));" nl)
-       (fwrite -> "JUMP_GE(" second-loop-label-end ");" nl)
-       (fwrite -> "MOV(INDD(R3, R4), SCMARG(R4));" nl)
-       (fwrite -> "INCR(R4);" nl)
-       (fwrite -> "JUMP(" second-loop-label ");" nl)
-       (fwrite > second-loop-label-end ":" nl)
-       (fwrite -> "MOV(INDD(R1, 0), R3); /* Add new frame to environment */" nl)
-       (fwrite -> nl)
-       (fwrite -> "PUSH(IMM(3));" nl)
-       (fwrite -> "CALL(MALLOC);" nl)
-       (fwrite -> "DROP(1);" nl)
-       (fwrite -> "MOV(INDD(R0, 0), T_CLOSURE);" nl)
-       (fwrite -> "MOV(INDD(R0, 1), R1);" nl)
-       (fwrite -> "MOV(INDD(R0, 2), &&" code-label ");" nl)
-       (fwrite -> "JUMP(" exit-label ");" nl)
-       (fwrite -> nl)
-       (fwrite > code-label ": /* Code for the procedure */" nl)
-       ))))
-
-;Code-gen for lambda simple.
-(define code-gen-lambda-simple
-  (lambda (pe env params depth)
-    (let* ((vars (lambda->vars pe))
-           (body (lambda->body pe))
-           (> (indent depth))
-           (-> (string-append > "\t"))
-           (--> (string-append -> "\t"))
-           (doc (^doc depth "Lambda-Simple: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (code-label (^label-lambda-simple-code))
-           (exit-label (^label-lambda-simple-exit))
-           (first-loop-label (^label-lambda-envext-simple-firstloop))
-           (first-loop-label-end (^label-lambda-envext-simple-firstloop-end))
-           (second-loop-label (^label-lambda-envext-simple-secondloop))
-           (second-loop-label-end (^label-lambda-envext-simple-secondloop-end)))
-      (begin
-        (fwrite pre-doc)
-        (code-gen-env-extension env
-                                params
-                                depth
-                                code-label
-                                exit-label
-                                first-loop-label
-                                first-loop-label-end
-                                second-loop-label
-                                second-loop-label-end)
-        (fwrite -> "PUSH(FP);" nl)
-        (fwrite -> "MOV(FP, SP);" nl)
-        (code-gen body (extend-env env params) vars (add1 depth))
-        (fwrite -> "POP(FP);" nl)
-        (fwrite -> "RETURN;" nl)
-        (fwrite > exit-label ":" nl)
-        (fwrite post-doc)
-        ))))
-
-;Code-gen for lambda optional.
-(define code-gen-lambda-opt
-  (lambda (pe env params depth)
-    (let* ((vars (lambda->vars pe))
-           (body (lambda->body pe))
-           (num-fixed-vars (sub1 (length vars)))
-           (> (indent depth))
-           (-> (string-append > "\t"))
-           (--> (string-append -> "\t"))
-           (doc (^doc depth "Lambda-Opt: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (code-label (^label-lambda-opt-code))
-           (exit-label (^label-lambda-opt-exit))
-           (stack-loop-label (^label-lambda-opt-stackcopy-loop))
-           (stack-exit-label (^label-lambda-opt-stackcopy-exit))
-           (first-loop-label (^label-lambda-envext-opt-firstloop))
-           (first-loop-label-end (^label-lambda-envext-opt-firstloop-end))
-           (second-loop-label (^label-lambda-envext-opt-secondloop))
-           (second-loop-label-end (^label-lambda-envext-opt-secondloop-end)))
-      (begin
-        (fwrite pre-doc)
-        (code-gen-env-extension env
-                                params
-                                depth
-                                code-label
-                                exit-label
-                                first-loop-label
-                                first-loop-label-end
-                                second-loop-label
-                                second-loop-label-end)
-        (fwrite -> "PUSH(FP);" nl)
-        (fwrite -> "MOV(FP, SP);" nl)
-        (fwrite -> "MOV(R1, NUM_ARGS);" nl)
-        (fwrite -> "SUB(R1, " (to-string (add1 num-fixed-vars)) ");" nl)
-        (fwrite -> "PUSH(R1); /* Number of optional parameters */" nl)
-        (fwrite -> "MOV(R2, FP);" nl)
-        (fwrite -> "SUB(R2, 3);" nl)
-        (fwrite -> "SUB(R2, NUM_ARGS); /* Address of bottom optional parameter */" nl)
-        (fwrite -> "PUSH(R2);" nl)
-        (fwrite -> "CALL(MAKE_LIST);" nl)
-        (fwrite -> "DROP(2);" nl)
-        (fwrite -> "MOV(SCMARG(" (to-string num-fixed-vars) "), R0); /* Replace first optional parameter with result */" nl)
-        (fwrite -> "DECR(R2); /* Address of copy destination */" nl)
-        (fwrite -> "MOV(R3, " (to-string num-fixed-vars) ");" nl)
-        (fwrite -> "ADD(R3, 5); /* Number of memory cells to copy down (mandatories, FP, RetAddr, env, NumArgs, created list) */" nl)
-        (fwrite -> "MOV(R4, FP);" nl)
-        (fwrite -> "SUB(R4, R3); /* Address of bottom cell to be copied (copy source) */" nl)
-        (fwrite > stack-loop-label ":" nl)
-        (fwrite -> "CMP(R3, 0);" nl)
-        (fwrite -> "JUMP_LE(" stack-exit-label ");" nl)
-        (fwrite -> "MOV(STACK(R2), STACK(R4));" nl)
-        (fwrite -> "INCR(R2);" nl)
-        (fwrite -> "INCR(R4);" nl)
-        (fwrite -> "DECR(R3);" nl)
-        (fwrite -> "JUMP(" stack-loop-label ");" nl)
-        (fwrite > stack-exit-label ":" nl)
-        (fwrite -> "SUB(R4, R2); /* Calculate copy distance */" nl)
-        (fwrite -> "SUB(FP, R4); /* Correct current FP */" nl)
-        (fwrite -> "SUBSP(R4); /* Correct current SP */" nl)
-        (fwrite -> "SUB(NUM_ARGS, R4); /* Correct number of arguments */" nl)
-        (code-gen body (extend-env env params) vars (add1 depth))
-        (fwrite -> "POP(FP);" nl)
-        (fwrite -> "RETURN;" nl)
-        (fwrite > exit-label ":" nl)
-        (fwrite post-doc)
-        ))))
-
-;Code-gen for lambda variadic.
-(define code-gen-lambda-var
-  (lambda (pe env params depth)
-    (let* ((vars (lambda->vars pe))
-           (body (lambda->body pe))
-           (> (indent depth))
-           (-> (string-append > "\t"))
-           (--> (string-append -> "\t"))
-           (doc (^doc depth "Lambda-Variadic: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (code-label (^label-lambda-var-code))
-           (exit-label (^label-lambda-var-exit))
-           (stack-loop-label (^label-lambda-var-stackcopy-loop))
-           (stack-exit-label (^label-lambda-var-stackcopy-exit))
-           (first-loop-label (^label-lambda-envext-var-firstloop))
-           (first-loop-label-end (^label-lambda-envext-var-firstloop-end))
-           (second-loop-label (^label-lambda-envext-var-secondloop))
-           (second-loop-label-end (^label-lambda-envext-var-secondloop-end)))
-      (begin
-        (fwrite pre-doc)
-        (code-gen-env-extension env
-                                params
-                                depth
-                                code-label
-                                exit-label
-                                first-loop-label
-                                first-loop-label-end
-                                second-loop-label
-                                second-loop-label-end)
-        (fwrite -> "PUSH(FP);" nl)
-        (fwrite -> "MOV(FP, SP);" nl)
-        (fwrite -> "MOV(R1, NUM_ARGS);" nl)
-        (fwrite -> "DECR(R1);" nl)
-        (fwrite -> "PUSH(R1); /* Number of optional parameters */" nl)
-        (fwrite -> "MOV(R2, FP);" nl)
-        (fwrite -> "SUB(R2, 3);" nl)
-        (fwrite -> "SUB(R2, NUM_ARGS); /* Address of bottom optional parameter */" nl)
-        (fwrite -> "PUSH(R2);" nl)
-        (fwrite -> "CALL(MAKE_LIST);" nl)
-        (fwrite -> "DROP(2);" nl)
-        (fwrite -> "MOV(SCMARG(0), R0); /* Replace first optional parameter with result */" nl)
-        (fwrite -> "DECR(R2); /* Address of copy destination */" nl)
-        (fwrite -> "MOV(R3, 5); /* Number of memory cells to copy down */" nl)
-        (fwrite -> "MOV(R4, FP);" nl)
-        (fwrite -> "SUB(R4, R3); /* Address of bottom cell to be copied (copy source) */" nl)
-        (fwrite > stack-loop-label ":" nl)
-        (fwrite -> "CMP(R3, 0);" nl)
-        (fwrite -> "JUMP_LE(" stack-exit-label ");" nl)
-        (fwrite -> "MOV(STACK(R2), STACK(R4));" nl)
-        (fwrite -> "INCR(R2);" nl)
-        (fwrite -> "INCR(R4);" nl)
-        (fwrite -> "DECR(R3);" nl)
-        (fwrite -> "JUMP(" stack-loop-label ");" nl)
-        (fwrite > stack-exit-label ":" nl)
-        (fwrite -> "SUB(R4, R2); /* Calculate copy distance */" nl)
-        (fwrite -> "SUB(FP, R4); /* Correct current FP */" nl)
-        (fwrite -> "SUBSP(R4); /* Correct current SP */" nl)
-        (fwrite -> "SUB(NUM_ARGS, R4); /* Correct number of arguments */" nl)
-        (code-gen body (extend-env env params) vars (add1 depth))
-        (fwrite -> "POP(FP);" nl)
-        (fwrite -> "RETURN;" nl)
-        (fwrite > exit-label ":" nl)
-        (fwrite post-doc)
-        ))))
-
-;Code-gen for parameters variables.
-(define code-gen-pvar
-  (lambda (pe env params depth)
-    (let* ((minor (pvar->minor pe))
-           (doc (^doc depth "pvar: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (-> (indent (add1 depth))))
-      (begin
-        (fwrite pre-doc)
-        (fwrite -> "MOV(R0, SCMARG(" (to-string minor) "));" nl)
-        (fwrite post-doc)
-        ))))
-
-;Code-gen for bound variables.
-(define code-gen-bvar
-  (lambda (pe env params depth)
-    (let* ((major (bvar->major pe))
-           (minor (bvar->minor pe))
-           (doc (^doc depth "bvar: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (-> (indent (add1 depth))))
-      (begin
-        (fwrite pre-doc)
-        (fwrite -> "MOV(R0, FPARG(0));" nl)
-        (fwrite -> "MOV(R0, INDD(R0, " (to-string major) "));" nl)
-        (fwrite -> "MOV(R0, INDD(R0, " (to-string minor) "));" nl)
-        (fwrite post-doc)
-        ))))
-
-;Getter: body out of or.
-(define or->body
-  (lambda (pe)
-    (cadr pe)))
-
-;Code-gen for or expression.
-(define code-gen-or
-  (lambda (pe env params depth)
-    (let* ((body-parts (split-all-last (or->body pe)))
-           (all-but-last (car body-parts))
-           (last (cadr body-parts))
-           (> (indent depth))
-           (-> (string-append > "\t"))
-           (doc (^doc depth "Or: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (exit-label (^label-or-exit)))
-      (begin
-        (fwrite pre-doc)
-        (rmap (lambda (pe)
-                (begin
-                  (code-gen pe env params (add1 depth))
-                  (fwrite -> "CMP(R0, IMM(SOB_FALSE));" nl)
-                  (fwrite -> "JUMP_NE(" exit-label ");" nl)))
-              all-but-last)
-        (code-gen last env params (add1 depth))
-        (if (not (null? all-but-last))
-            (fwrite > exit-label ":" nl))
-        (fwrite post-doc)
-        ))))
-
-
-; ------------------------------------- ;
-; ------------- CONSTANTS ------------- ;
-; ------------------------------------- ;
-
-;Make constant table.
-(define ^ctbl
-  (lambda (size table) (cons size table)))
-;Getter: size out of constant table.
-(define ctbl->size car)
-;Getter: table out of constant table.
-(define ctbl->table cdr)
-;Getter: address out of constant table entry.
-(define ctbl-entry->addr car)
-;Getter: constant out of constant table entry.
-(define ctbl-entry->const cadr)
-;Getter: data out of constant table entry.
-(define ctbl-entry->data caddr)
-;Make constant table entry.
-(define ^ctbl-entry
-  (lambda (addr const data) (list addr const data)))
-
-;Searches "const" inside the constant table.
-(define ctbl-table-lookup
-  (lambda (table const)
-    (ormap (lambda (entry) (if (equal? const (ctbl-entry->const entry)) entry #f))
-           table)))
-;Wrapper for ctbl-table-lookup.
-(define ctbl-lookup
-  (lambda (const)
-    (ctbl-table-lookup (ctbl->table (unbox const-table)) const)))
-
-(define *const-table-location* 1000) ; Basic constants and primitives closures stored at beginning
-;Defenition for constant table.
-(define const-table (box (^ctbl *const-table-location* '())))
-
-;Adds a constant to the table.
-(define add-constant
-  (lambda (const data)
-    (let* ((ctbl (unbox const-table))
-           (size (ctbl->size ctbl))
-           (table (ctbl->table ctbl))
-           (entry (ctbl-table-lookup table const)))
-      (if entry
-          entry
-          (let ((new-entry (^ctbl-entry size const data)))
-            (set-box! const-table (^ctbl (+ size (length data)) (cons new-entry table)))
-            new-entry)))))
-
-;Wrapper for add-constant, deals with all types of constants.
-(define recursive-add-const
-  (lambda (const)
-    (cond ((number? const) (add-constant const `("T_INTEGER" ,const)))
-          ((char? const) (add-constant const `("T_CHAR" ,(char->integer const))))
-          ((string? const)
-           (add-constant const
-                         `("T_STRING"
-                           ,(string-length const)
-                           ,@(map char->integer (string->list const)))))
-          ((symbol? const)
-           (let* ((entry (recursive-add-const (symbol->string const)))
-                  (new-entry (add-constant const `("T_SYMBOL" ,(ctbl-entry->addr entry))))) ; Add to constant table
-             (add-symbol const (ctbl-entry->addr new-entry)) ; Add to symbol table
-             new-entry))
-          ((pair? const)
-           (let ((first (recursive-add-const (car const)))
-                 (second (recursive-add-const (cdr const))))
-             (add-constant const `("T_PAIR" ,(ctbl-entry->addr first) ,(ctbl-entry->addr second)))))
-          ((vector? const)
-           (add-constant const
-                         `("T_VECTOR"
-                           ,(vector-length const)
-                           ,@(map (lambda (c) (ctbl-entry->addr (recursive-add-const c))) (vector->list const)))))
-          ((boolean? const) (if const
-                                (^ctbl-entry "SOB_TRUE" #t `("T_BOOL" 1))
-                                (^ctbl-entry "SOB_FALSE" #f `("T_BOOL" 0))))
-          ((void? const) (^ctbl-entry "SOB_VOID" const `("T_VOID")))
-          ((null? const) (^ctbl-entry "SOB_NIL" const `("T_NIL")))
-          (else (error "recursive-add-const" (format "~s" const)))
-          )))
-
-;Defines the constant table.
-(define define-const-table
+(define load-const-table-cisc
   (lambda ()
-    (let* ((table (ctbl->table (unbox const-table)))
-           (all-data (apply append (reverse (map ctbl-entry->data table))))
-           (data-string (map (lambda (value) (string-append (to-string value) ", ")) all-data))
-           (const-array (string-append "long const_table[] = { " (apply string-append data-string) "};")))
-      (document 1 (string-append (indent 1) const-array nl) "Constant table definition"))))
-
-;Loads the constant table to the memory.
-(define load-const-table
-  (lambda ()
-    (document 1
-              (string-append
-               (indent 1)
-               "memcpy((void*) &ADDR("
-               (to-string *const-table-location*)
+              (string-append "memcpy((void*) &ADDR("
+               (to-string *ctbl-start-location*)
                "), (void*) const_table, "
-               (to-string (- (const-table-end) *const-table-location*))
-               " * WORD_SIZE);" nl)
-              "Copy constant table to machine memory")))
+               (to-string (- (get-ctbl-size (get-ctbl)) *ctbl-start-location*))
+               " * WORD_SIZE);
+")
+    ))
 
-;Defines the constant table end.
-(define const-table-end (lambda () (ctbl->size (unbox const-table))))
+;;;;;;;;;symbol table;;;;;;;;
 
-;Make free vars table
-(define ^ftbl
-  (lambda (base-address lst)
-    (letrec ((f (lambda (lst address)
-                  (if (null? lst)
-                      lst
-                      (cons `(,address ,(caar lst) ,(symbol->string (cadar lst)))
-                            (f (cdr lst) (add1 address)))))))
-      (f lst base-address))))
+(define add-to-end-of-lst
+  (lambda (lst elem)
+    (fold-right cons (list elem) lst)))
 
-;Add a free var to the table.
-(define add-free-var
-  (lambda (name)
-    (if (not (assoc name (unbox free-vars)))
-        (set-box! free-vars (cons (list name 'undef) (unbox free-vars))))))
+(define fix-address-of-before-last
+  (lambda (new-address lst)
+    (let* ((current-el (car lst))
+           (current-el-address (get-symtable-entry-next current-el)))
+      (if(= current-el-address 0)
+         (let ((symb (car current-el))
+               (symb-address (cadr current-el)))
+           (list symb symb-address new-address))
+         (list (fix-address-of-before-last (cdr lst)))
+         ))))
 
-;Wrapper for ^ftbl
-(define build-fvar-table
-  (lambda (base-address)
-    (^ftbl base-address (reverse (unbox free-vars)))))
+;(symb entry-address 0)
 
-;Free vars table initialization
-(define fvar-table
-  (box '()))
+(define *sym-table-start* 1)
+(define *sym-table-entry-size* 2)
+(define *sym-table-size* 0)
+;Initialization of symbol table.
+(define symbol-table (box '()))
+;get symbol table data
+(define get-symtable-data 
+  (lambda () (unbox symbol-table)))
 
-;Getter: address out of free vars table entry.
-(define ftbl-entry->addr car)
-;Getter: name out of free vars table entry.
-(define ftbl-entry->name cadr)
-;Getter: value out of free vars table entry.
+(define get-symtable-entry-next caddr)
+(define get-symtable-entry-symb car)
+
+(define sym-table-lookup
+  (lambda (symb)
+    (let ((unboxed-symtable (get-symtable-data)))
+      (if (null? unboxed-symtable)
+          #f
+          (ormap (lambda (entry) 
+                   (if (equal? symb (get-symtable-entry-symb entry)) 
+                       entry 
+                       #f))
+                 unboxed-symtable)
+          ))))
+
+(define symbol-adder
+  (lambda (symb data)
+    (print_all (list (cons "symbol-adder with " symb)))
+    (let ((table (get-symtable-data))
+          (entry-address (ctbl-entry-get-address data)))
+      (if (null? table)
+          (set-box! symbol-table (list (list symb entry-address 0))) ; (symbol next)
+          (let ((sym-exist (sym-table-lookup symb)))
+            (if (not sym-exist)
+                (set-box! symbol-table 
+                          (add-to-end-of-lst (fix-address-of-before-last entry-address table) 
+                                             (list symb entry-address 0)))))
+          ))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;fvar table ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define get-fvar-table-start-location (lambda() (get-ctbl-end-address)) )  ;end if constants table
+(define fvar-table (box '())) ;the constant table
+(define get-fvar-table (lambda() (unbox fvar-table)))
+
+(define fvar->name cadr)
+(define fvar->address car)
 (define ftbl-entry->value caddr)
 
-;Lookup a free variable name in the free vars table.
-(define ftbl-lookup
-  (lambda (name)
-    (ormap (lambda (entry) (if (eq? name (ftbl-entry->name entry)) entry #f))
-           (unbox fvar-table))))
+(define fVar-table-lookup-address
+  (lambda (fvar)
+    (let ((unboxed-fvar-table (get-fvar-table)))
+      (letrec ((runner
+                (lambda (fvar-entries)
+                  (if (null? fvar-entries) ;this should never happen!! delete at production
+                      "error: Var-table-lookup-address: variable doesn't exist in code"
+                      (let ((first (car fvar-entries))
+                            (rest (cdr fvar-entries)))
+                        (print_all (list (cons "first" first  ) (cons "name" (fvar->name first) )))
+                        ;fvar-entries
+                        (if (equal?  (fvar->name first) fvar)
+                            (fvar->address first)
+                            (runner rest))
+                        )))
+                ))
+        (runner unboxed-fvar-table))              
+          )))
 
-;Defines the free var table
+(define add-fvar
+  (lambda (var-name)
+    (let ((unboxed-fvars (unbox fvar-table)))
+      (if (not (assoc var-name unboxed-fvars))
+          (set-box! fvar-table (cons (list var-name 'undefined) unboxed-fvars)))))) ;'undefined not neccessary????
+
+(define fvar-table-address-builder
+  (lambda(fvar-lst start-address)
+    (letrec ((runner 
+              (lambda (lst address)
+                (if (null? lst)
+                    lst
+                    ;(let((current_el (car lst)))
+                    (cons `(,address ,(caar lst) ,(cadar lst)) 
+                          (runner (cdr lst) (+ 1 address)))
+                    )
+                )))
+      (set-box! fvar-table (runner fvar-lst start-address)))
+    ))
+
+
 (define define-fvar-table
   (lambda ()
-    (let* ((table (unbox fvar-table))
-           (all-data (map ftbl-entry->value table))
+    (let* ((fvar-table  (get-fvar-table))
+           (all-data (map ftbl-entry->value fvar-table))
            (data-string (map (lambda (value) (string-append (to-string value) ", ")) all-data))
            (fvar-array (string-append "long fvar_table[] = { " (apply string-append data-string) "};")))
-      (document 1 (string-append (indent 1) fvar-array nl) "Free-var table definition"))))
+      fvar-array )))
 
 ;Loads the free variables table to memory
 (define load-fvar-table
   (lambda ()
-    (document 1
               (string-append
-               (indent 1)
+               
                "memcpy((void*) &ADDR("
-               (to-string (const-table-end))
+               (to-string (get-ctbl-end-address))
                "), (void*) fvar_table, "
-               (to-string (length (unbox fvar-table)))
-               " * WORD_SIZE);" nl)
-              "Copy free-var table to machine memory")))
+               (to-string (length (get-fvar-table)))
+               " * WORD_SIZE);")
+    ))
 
 ;Defines the free variables table end.
 (define fvar-table-end (lambda () (+ (const-table-end) (length (unbox fvar-table)))))
 
-;Code-gen for define expression.
-(define code-gen-define
-  (lambda (pe env params depth)
-    (let* ((body (define->body pe))
-           (var (define->var pe))
-           (var-name (fvar->name var))
-           (entry (ftbl-lookup var-name))
-           (doc (^doc depth "Define: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (-> (indent (add1 depth))))
-      (if entry
-          (begin
-            (fwrite pre-doc)
-            (code-gen body env params (add1 depth))
-            (fwrite -> "MOV(IND(" (to-string (ftbl-entry->addr entry)) "), R0);" nl)
-            (fwrite -> "MOV(R0, IMM(SOB_VOID));" nl)
-            (fwrite post-doc))
-          (error "code-gen-define" (string-append "Unknown free variable: " (to-string var-name)))))))
-
-
-;Code-gen for tail call application.
-(define code-gen-tc-applic
-  (lambda (pe env params depth)
-    (let* ((args (applic->args pe))
-           (proc (applic->proc pe))
-           (m (length args))
-           (> (indent depth))
-           (-> (string-append > "\t"))
-           (doc (^doc depth "TC-Applic: " pe))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (loop-label (^label-tc-applic-loop))
-           (exit-label (^label-tc-applic-exit)))
-      (begin
-        (fwrite pre-doc)
-        (fwrite -> "PUSH(IMM(SOB_NIL));" nl)
-        (rmap (lambda (pe)
-                (begin
-                  (code-gen pe env params (add1 depth))
-                  (fwrite -> "PUSH(R0);" nl)))
-              (reverse args))
-        (fwrite -> "PUSH(" (to-string (add1 m)) ");" nl)
-        (code-gen proc env params (add1 depth))
-        (fwrite -> "CMP(IND(R0), IMM(T_CLOSURE));" nl)
-        (fwrite -> "JUMP_NE(Lnot_proc);" nl)
-        (fwrite -> "PUSH(INDD(R0, 1));" nl)
-        (fwrite -> "PUSH(FPARG(-1));" nl)
-        (fwrite )
-        (fwrite -> "MOV(R1, FPARG(-2));" nl)
-        (fwrite )
-        (fwrite -> "MOV(R2, FP);" nl)
-        (fwrite -> "SUB(R2, IMM(4));" nl)
-        (fwrite -> "SUB(R2, NUM_ARGS); /* Address of copy destination */" nl)
-        (fwrite -> "MOV(R3, SP);" nl)
-        (fwrite -> "SUB(R3, FP); /* Number of memory cells to copy down (= SP - FP) */" nl)
-        (fwrite -> "MOV(R4, FP); /* Address of bottom cell to be copied (copy source) */" nl)
-        (fwrite > loop-label ":" nl)
-        (fwrite -> "CMP(R3, IMM(0));" nl)
-        (fwrite -> "JUMP_LE(" exit-label ");" nl)
-        (fwrite -> "MOV(STACK(R2), STACK(R4));" nl)
-        (fwrite -> "INCR(R2);" nl)
-        (fwrite -> "INCR(R4);" nl)
-        (fwrite -> "DECR(R3);" nl)
-        (fwrite -> "JUMP(" loop-label ");" nl)
-        (fwrite > exit-label ":" nl)
-        (fwrite -> "MOVSP(R2);" nl)
-        (fwrite -> "MOV(FP, R1);" nl)
-        (fwrite -> "/* Call the procedure */" nl)
-        (fwrite -> "JUMPA(INDD(R0, 2));" nl))
-        (fwrite post-doc)
-      )))
-
-;Make entry to the symbol table.
-(define stbl-make-entry
-  (lambda (rel-addr symbol data next)
-    (list rel-addr symbol data next)))
-
-;Getter: address out of symbol table entry.
-(define stbl-entry->rel-addr car)
-;Getter: symbol out of symbol table entry.
-(define stbl-entry->symbol cadr)
-;Getter: data out of symbol table entry.
-(define stbl-entry->data caddr)
-;Getter: next symbol out of symbol table entry.
-(define stbl-entry->next cadddr)
-;Getter: full data(all the symbols in an entry) out of symbol table entry.
-(define stbl-entry->full-data
-  (lambda (entry)
-    (list (stbl-entry->data entry) (stbl-entry->next entry))))
-(define *stbl-entry-data-size* 2)
-;Lookup symbol inside the symbol table.
-(define sym-table-lookup
-  (lambda (sym)
-    (ormap (lambda (entry) (if (eq? sym (stbl-entry->symbol entry)) entry #f))
-           (unbox sym-tab))))
-;Adding a symbol to the symbol table.
-(define add-symbol
-  (lambda (sym data)
-    (let ((entry (sym-table-lookup sym))
-          (table (unbox sym-tab)))
-      (if (not entry)
-          (begin
-            (set! *sym-tab-location* (- *sym-tab-location* *stbl-entry-data-size*))
-            (if (null? table)
-                (set-box! sym-tab (list (stbl-make-entry 0 sym data 0)))
-                (let ((first-entry-addr (stbl-entry->rel-addr (car table))))
-                  (set-box! sym-tab
-                            (cons (stbl-make-entry (- first-entry-addr *stbl-entry-data-size*) sym data first-entry-addr)
-                                  (unbox sym-tab))))))))))
-
-;Shifts the symbol table according to offset which we know only after creating all the other tables(free vars, etc...)
-(define shift-sym-tab
-  (lambda (offset)
-    (letrec ((shift (lambda (table offset)
-                      (if (null? table)
-                          table
-                          (with (car table)
-                                (lambda (rel-addr symbol data next)
-                                  (cons (stbl-make-entry (+ offset rel-addr)
-                                                         symbol
-                                                         data
-                                                         (if (null? (cdr table))
-                                                             next
-                                                             (+ offset next)))
-                                        (shift (cdr table) offset))))))))
-      (set! *sym-tab-location* (+ *sym-tab-location* offset))
-      (set-box! sym-tab (shift (unbox sym-tab) offset)))))
-;Getter: size of symbol table.
-(define sym-table-size
-  (lambda ()
-    (* (length (unbox sym-tab)) *stbl-entry-data-size*)))
-
-;Defines the symbol table.
-(define define-sym-table
-  (lambda ()
-    (let* ((table (unbox sym-tab))
-           (all-data (apply append (map stbl-entry->full-data table)))
-           (data-string (map (lambda (value) (string-append (to-string value) ", ")) all-data))
-           (const-array (string-append "long sym_table[] = { " (apply string-append data-string) "};")))
-      (document 1 (string-append (indent 1) const-array nl) "(Initial) Symbol table definition"))))
-
-;Loads the symbol table to memory.
-(define load-sym-table
-  (lambda ()
-    (document 1
-              (string-append
-               (indent 1)
-               "memcpy((void*) &ADDR("
-               (to-string *sym-tab-location*)
-               "), (void*) sym_table, "
-               (to-string (sym-table-size))
-               " * WORD_SIZE);" nl)
-              "Copy symbol table to machine memory")))
-
-;Defines the symbol table end.
-(define define-sym-table-head
-  (lambda ()
-    (string-append
-     "#define sym_tab_head IND(" (to-string (+ *sym-tab-location* (sym-table-size))) ")" nl)))
-;Loads the symbol table head to memory.
-(define load-sym-table-head
-  (lambda ()
-    (document 1
-              (string-append
-               (indent 1)
-               "MOV(sym_tab_head, IMM(" (if (> (sym-table-size) 0) (to-string *sym-tab-location*) "0") "));"
-               nl)
-              "'Head' of symbol table linked list")))
-(define *sym-table-head-size* 1) ; Constant for size of "head" variable of the symbol table
-
-;Getter: symbol table location.
-(define *sym-tab-location* *stbl-entry-data-size*)
-;Initialization of symbol table.
-(define sym-tab (box '()))
-;End location of symbol table.
-(define sym-table-end
-  (lambda ()
-    (+ *sym-tab-location* (sym-table-size))))
-
-;Defines the end of all the tables.
-(define total-tables-end
-  (lambda ()
-    (+ (sym-table-end) *sym-table-head-size*)))
-
-;Initializes all tables(free vars, constants and symbols).
-(define static-analyze
+(define build-tables
   (lambda (pe)
-    (cond ((null? pe) pe)
-          ((not (pair? pe)) pe)
-          ((type? pe 'const) (recursive-add-const (const->value pe)))
-          ((type? pe 'fvar) (add-free-var (fvar->name pe)))
-          (else (map static-analyze pe)))
-    *void-object*))
-
-;Code-gen main procedure.
-(define code-gen
-  (lambda (pe env params depth)
-    (cond
-      ((null? pe) "")
-      ((type? pe 'seq) (code-gen-seq pe env params depth))
-      ((type? pe 'if3) (code-gen-if3 pe env params depth))
-      ((type? pe 'or) (code-gen-or pe env params depth))
-      ((type? pe 'const) (code-gen-const pe env params depth))
-      ((type? pe 'fvar) (code-gen-fvar pe env params depth))
-      ((type? pe 'applic) (code-gen-applic pe env params depth))
-      ((type? pe 'tc-applic) (code-gen-tc-applic pe env params depth))
-      ((type? pe 'lambda-simple) (code-gen-lambda-simple pe env params depth))
-      ((type? pe 'lambda-opt) (code-gen-lambda-opt pe env params depth))
-      ((type? pe 'lambda-variadic) (code-gen-lambda-var pe env params depth))
-      ((type? pe 'pvar) (code-gen-pvar pe env params depth))
-      ((type? pe 'bvar) (code-gen-bvar pe env params depth))
-      ((type? pe 'define) (code-gen-define pe env params depth))
-      (else (error "code-gen" (format "~s" pe))))
+    (if (or (null? pe) (not (pair? pe)))
+        pe
+        (cond 
+          ((check-type? pe '(var)) (add-fvar (fvar->name pe))) ;CHANGE TO FVAR
+          ((check-type? pe '(const)) (add-constant-to-table (const-exp->value pe)))
+          (else (map build-tables pe))
+          ))
+    ;*void-object* 
     ))
 
-;Prologue for the entire CISC code. a fixed code that has to be at the beginning of every CISC program.
-(define prologue
-  (lambda (output-name)
-    (let ((-> (indent 1)))
-      (string-append
-       "/* " output-name nl
-       " * Auto-generated file created by the compiler." nl
-       " * " nl
-       " * Programmer: You." nl
-       " */" nl
-       nl
-       "#include <stdio.h>" nl
-       "#include <stdlib.h>" nl
-       "#include <string.h>" nl
-       nl
-       "/* Disable debug printouts (not that we used them anyway) */" nl
-       "#define DO_SHOW 0" nl
-       nl
-       "#include \"cisc.h\"" nl
-       "#include <lib/scheme/types.inc>" nl
-       nl
-       "#define SOB_VOID     1" nl
-       "#define SOB_NIL      2" nl
-       "#define SOB_FALSE    3" nl
-       "#define SOB_TRUE     5" nl
-       "#define undef        14" nl
-       (define-sym-table-head) nl
-       nl
-       "int main()" nl
-       "{" nl
-       -> "START_MACHINE;" nl
-       nl
-       -> "/* Allocate memory for constants and free variables */" nl
-       -> "PUSH(" (to-string (total-tables-end)) ");" nl
-       -> "CALL(MALLOC);" nl
-       -> "DROP(1);" nl
-       -> "" nl
-       -> "MOV(IND( 1), IMM(T_VOID));" nl
-       -> "MOV(IND( 2), IMM(T_NIL));" nl
-       -> "MOV(IND( 3), IMM(T_BOOL));" nl
-       -> "MOV(IND( 4), IMM(0))" nl
-       -> "MOV(IND( 5), IMM(T_BOOL));" nl
-       -> "MOV(IND( 6), IMM(1));" nl
-       -> "MOV(IND( 6), IMM(1));" nl
-       -> "MOV(IND( 7), IMM(T_STRING));" nl
-       -> "MOV(IND( 8), IMM(5));" nl
-       -> "MOV(IND( 9), IMM('u'));" nl
-       -> "MOV(IND(10), IMM('n'));" nl
-       -> "MOV(IND(11), IMM('d'));" nl
-       -> "MOV(IND(12), IMM('e'));" nl
-       -> "MOV(IND(13), IMM('f'));" nl
-       -> "MOV(IND(14), IMM(T_SYMBOL));" nl
-       -> "MOV(IND(15), IMM(7));" nl
-       -> "" nl
-       -> "MOV(R0, IMM(SOB_VOID));" nl
-       -> "" nl
-       -> "JUMP(CONTINUE);" nl
-       nl
-       "#include \"io.lib\"" nl
-       "#include \"system.lib\"" nl
-       "#include \"scheme.lib\"" nl
-       "#include \"extra.lib\"" nl
-       nl
-       "CONTINUE:" nl
-       -> "MOV(R0, R0); /* To avoid an error of not having a statement after a label */" nl 
-       "#include \"closures.asm\"" nl
-       nl
-       (define-const-table) nl
-       (define-fvar-table) nl
-       (define-sym-table) nl
-       (load-const-table) nl
-       (load-fvar-table) nl
-       (load-sym-table) nl
-       (load-sym-table-head) nl
-       
-       nl))))
 
-;Epilogue for the entire CISC code. a fixed code that has to be at the end of every CISC program.
-(define epilogue
-  (let* ((> (indent 0))
-         (-> (string-append > "\t")))
-    (string-append
-     -> "JUMP(Fin);" nl
-     -> nl
-     > "Lnot_proc:" nl
-     -> "putchar('E');" nl
-     -> "putchar('r');" nl
-     -> "putchar('r');" nl
-     -> "putchar('o');" nl
-     -> "putchar('r');" nl
-     -> "putchar(':');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('N');" nl
-     -> "putchar('o');" nl
-     -> "putchar('t');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('a');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('p');" nl
-     -> "putchar('r');" nl
-     -> "putchar('o');" nl
-     -> "putchar('c');" nl
-     -> "putchar('e');" nl
-     -> "putchar('d');" nl
-     -> "putchar('u');" nl
-     -> "putchar('r');" nl
-     -> "putchar('e');" nl
-     -> "putchar('\\n');" nl
-     -> "JUMP(Fin);" nl
-     -> nl
-     > "Lnot_pair:" nl
-     -> "putchar('E');" nl
-     -> "putchar('r');" nl
-     -> "putchar('r');" nl
-     -> "putchar('o');" nl
-     -> "putchar('r');" nl
-     -> "putchar(':');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('N');" nl
-     -> "putchar('o');" nl
-     -> "putchar('t');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('a');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('p');" nl
-     -> "putchar('a');" nl
-     -> "putchar('i');" nl
-     -> "putchar('r');" nl
-     -> "putchar('\\n');" nl
-     -> "JUMP(Fin);" nl
-     -> nl
-     > "Lstack_overflow:" nl
-     -> "putchar('E');" nl
-     -> "putchar('r');" nl
-     -> "putchar('r');" nl
-     -> "putchar('o');" nl
-     -> "putchar('r');" nl
-     -> "putchar(':');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('S');" nl
-     -> "putchar('t');" nl
-     -> "putchar('a');" nl
-     -> "putchar('c');" nl
-     -> "putchar('k');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('o');" nl
-     -> "putchar('v');" nl
-     -> "putchar('e');" nl
-     -> "putchar('r');" nl
-     -> "putchar('f');" nl
-     -> "putchar('l');" nl
-     -> "putchar('o');" nl
-     -> "putchar('w');" nl
-     -> "putchar('\\n');" nl
-     -> "JUMP(Fin);" nl
-     -> nl
-     > "Lstack_underflow:" nl
-     -> "putchar('E');" nl
-     -> "putchar('r');" nl
-     -> "putchar('r');" nl
-     -> "putchar('o');" nl
-     -> "putchar('r');" nl
-     -> "putchar(':');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('S');" nl
-     -> "putchar('t');" nl
-     -> "putchar('a');" nl
-     -> "putchar('c');" nl
-     -> "putchar('k');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('u');" nl
-     -> "putchar('n');" nl
-     -> "putchar('d');" nl
-     -> "putchar('e');" nl
-     -> "putchar('r');" nl
-     -> "putchar('f');" nl
-     -> "putchar('l');" nl
-     -> "putchar('o');" nl
-     -> "putchar('w');" nl
-     -> "putchar('\\n');" nl
-     -> "JUMP(Fin);" nl
-     -> nl
-     > "Lout_of_mem:" nl
-     -> "putchar('E');" nl
-     -> "putchar('r');" nl
-     -> "putchar('r');" nl
-     -> "putchar('o');" nl
-     -> "putchar('r');" nl
-     -> "putchar(':');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('O');" nl
-     -> "putchar('u');" nl
-     -> "putchar('t');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('o');" nl
-     -> "putchar('f');" nl
-     -> "putchar(' ');" nl
-     -> "putchar('m');" nl
-     -> "putchar('e');" nl
-     -> "putchar('m');" nl
-     -> "putchar('o');" nl
-     -> "putchar('r');" nl
-     -> "putchar('y');" nl
-     -> "putchar('\\n');" nl
-     -> "JUMP(Fin);" nl
-     -> nl
-     > "Fin:" nl
-     -> "STOP_MACHINE;" nl
-     -> nl
-     -> "return 0;" nl
-     > "}" nl
-     )))
+(define compile-scheme-file 
+  (lambda (scheme-source cisc-output) ;gets names of files
+    (let ((sexpr (file->sexpr scheme-source)))
+      ;(print_all (list (cons "sexpr after process " sexpr)))
+      (let ((parsed-exp (parse sexpr)))
+        (let((ready_code parsed-exp));(run-ass3 parsed-exp)))
+          (print_all (list (cons "ready_code" ready_code)))
+          (let ((ans (build-tables ready_code)))
+            (let ((code-gen-ans "code-gen-not-implemented"))
 
-(define ^label-print-result (^^label "LPrintResEnd"))
+              (make-full-code cisc-output code-gen-ans)
+              ;(ctbl-lookup-address 1)
+             ; (fVar-table-lookup-address 'a)
+              )
+            
+            ))))))
 
-;Prints the result(value) of an expression.
-(define print-result
-  (lambda ()
-    (let* ((print-label (^label-print-result))
-           (doc (^doc 1 "Print evaluation result"))
-           (pre-doc (doc->pre doc))
-           (post-doc (doc->post doc))
-           (-> (indent 1)))
-      (begin
-        (fwrite pre-doc)
-        (fwrite -> "CMP(IND(R0), IMM(T_VOID));" nl)
-        (fwrite -> "JUMP_EQ(" print-label ");" nl)
-        (fwrite -> "PUSH(R0);" nl)
-        (fwrite -> "CALL(WRITE_SOB);" nl)
-        (fwrite -> "CALL(NEWLINE);" nl)
-        (fwrite print-label ":" nl)
-        (fwrite post-doc)
-        ))))
 
-;Write to file.
-(define write-file
-  (lambda (text file)
-    (let ((out (open-output-file file 'replace)))
-      (begin
-        (display text out)
-        (close-output-port out)))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;Code-gen;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define code-gen
+  (lambda (parsed-exp env params depth)
+    (cond
+      ((null? parsed-exp) "")
+      ;((check-type? parsed-exp '(seq)) (code-gen-seq parsed-exp env params depth))
+      ;((check-type? parsed-exp '(if3)) (code-gen-if3 parsed-exp env params depth))
+      ;((check-type? parsed-exp '(or)) (code-gen-or parsed-exp env params depth))
+      ;((check-type? parsed-exp '(const)) (code-gen-const parsed-exp env params depth))
+      ;((check-type? parsed-exp '(fvar)) (code-gen-fvar parsed-exp env params depth))
+      ;((check-type? parsed-exp '(applic)) (code-gen-applic parsed-exp env params depth))
+      ;((check-type? parsed-exp '(tc-applic)) (code-gen-tc-applic parsed-exp env params depth))
+      ;((check-type? parsed-exp '(lambda-simple)) (code-gen-lambda-simple parsed-exp env params depth))
+      ;((check-type? parsed-exp '(lambda-opt)) (code-gen-lambda-opt parsed-exp env params depth))
+      ;((check-type? parsed-exp '(lambda-variadic)) (code-gen-lambda-var parsed-exp env params depth))
+      ;((check-type? parsed-exp '(pvar)) (code-gen-pvar parsed-exp env params depth))
+      ;((check-type? parsed-exp '(bvar)) (code-gen-bvar parsed-exp env params depth))
+      ;((check-type? parsed-exp '(define)) (code-gen-define parsed-exp env params depth))
+      (else (error "code-gen" (format "~s" parsed-exp))))
+    ))
 
-;Holds the file port for writing to the output file
-(define *out-file-port* 0)
-;Opens the output file for writing and saves its port
-(define fopen
-  (lambda (out-file)
-    (set! *out-file-port* (open-output-file out-file 'replace))))
-;Writes to the output file
-(define fwrite
-  (lambda texts
-    (if (not (null? texts))
-        (begin (display (car texts) *out-file-port*)
-               (apply fwrite (cdr texts))))))
-;Closes the output file
-(define fclose
-  (lambda ()
-    (begin
-      (close-output-port *out-file-port*)
-      (set! *out-file-port* 0))))
 
-;Gets the file name out of "require" expressions (of the form '(require "filename"))
-(define require->filename cadr)
-
-;Handles "require" expressions prior to the parsing
-(define pre-process
-  (lambda (sexprs)
-    (if (or (null? sexprs) (not (pair? sexprs)))
-        sexprs
-        (let ((first (car sexprs)))
-          (if (type? first 'require)
-              (pre-process (append (file->sexprs (require->filename first)) (cdr sexprs)))
-              (cons first (pre-process (cdr sexprs))))))))
-
-;Main function - compiles the given source file into the given target file
-(define compile-scheme-file
-  (lambda (source-file target-file)
-    (let ((code (pe->lex-pe (map (lambda (pe) (annotate-tc (parse pe))) (pre-process (cons '(require "support-code.scm") (file->sexprs source-file)))))))
-      (begin
-        (static-analyze code)
-        (set-box! fvar-table (build-fvar-table (const-table-end)))
-        (shift-sym-tab (+ (fvar-table-end) (sym-table-size) (- *stbl-entry-data-size*)))
-        
-        (fopen target-file)
-        (fwrite (prologue target-file))
-        (rmap (lambda (pe)
-                (begin
-                  (code-gen pe (new-env) (new-params) 1)
-                  (print-result)))
-              code)
-        (fwrite epilogue)
-        (fclose)
-        ))))
-
-;Initializes free variables.
-(define free-vars
+;fvars
+#;(define free-var-boxed-list
   (box '((cons prim_cons)
          (boolean? is_boolean)
          (+ prim_plus)
@@ -1830,3 +2107,6 @@
          (string->symbol prim_string_to_symbol)
          (eq? prim_is_eq)
          )))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;junk-yard;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+

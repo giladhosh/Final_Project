@@ -1877,7 +1877,7 @@
     ))
 
 ;     ctbl-entry-get-memory-rep
-(define define-const-table
+(define define-const-table-cisc
   (lambda ()
     (let* ((entries (get-ctbl-entries(get-ctbl)))
            (all-data (apply append (reverse (map ctbl-entry-get-memory-rep entries))))
@@ -1892,7 +1892,7 @@
         c
         (format "~s" c))))
 
-(define load-const-table
+(define load-const-table-cisc
   (lambda ()
               (string-append "memcpy((void*) &ADDR("
                (to-string *ctbl-start-location*)
@@ -1961,21 +1961,41 @@
           ))))
 
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;fvar table ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define get-fvar-table-start-location (lambda() (get-ctbl-end-address)) )  ;end if constants table
 (define fvar-table (box '())) ;the constant table
-(define get-fvar-table (lambda() (unbox free-var-boxed-list)))
+(define get-fvar-table (lambda() (unbox fvar-table)))
 
 
 (define fvar->name cadr)
+(define fvar->address car)
+
+(define fVar-table-lookup-address
+  (lambda (fvar)
+    (let ((unboxed-fvar-table (get-fvar-table)))
+      (letrec ((runner
+                (lambda (fvar-entries)
+                  (if (null? fvar-entries) ;this should never happen!! delete at production
+                      "error: Var-table-lookup-address: variable doesn't exist in code"
+                      (let ((first (car fvar-entries))
+                            (rest (cdr fvar-entries)))
+                        (print_all (list (cons "first" first  ) (cons "name" (fvar->name first) )))
+                        ;fvar-entries
+                        (if (equal?  (fvar->name first) fvar)
+                            (fvar->address first)
+                            (runner rest))
+                        )))
+                ))
+        (runner unboxed-fvar-table))              
+
+          )))
 
 (define add-fvar
   (lambda (var-name)
-    (let ((unboxed-fvars (unbox free-var-boxed-list)))
+    (let ((unboxed-fvars (unbox fvar-table)))
       (if (not (assoc var-name unboxed-fvars))
-          (set-box! free-var-boxed-list (cons (list var-name 'undefined) unboxed-fvars)))))) ;'undefined not neccessary????
+          (set-box! fvar-table (cons (list var-name 'undefined) unboxed-fvars)))))) ;'undefined not neccessary????
 
 (define fvar-table-address-builder
   (lambda(fvar-lst start-address)
@@ -1988,17 +2008,16 @@
                           (runner (cdr lst) (+ 1 address)))
                     )
                 )))
-      (runner fvar-lst start-address))
+      (set-box! fvar-table (runner fvar-lst start-address)))
     ))
 
 
 (define build-tables
   (lambda (pe)
-    (print_all (list (cons "strtd build-tables wth: " pe)))
     (if (or (null? pe) (not (pair? pe)))
         pe
         (cond 
-          ((check-type? pe '(fvar)) (add-fvar (fvar->name pe)))
+          ((check-type? pe '(var)) (add-fvar (fvar->name pe))) ;CHANGE TO FVAR
           ((check-type? pe '(const)) (add-constant-to-table (const-exp->value pe)))
           (else (map build-tables pe))
           ))
@@ -2008,59 +2027,19 @@
 (define compile-scheme-file 
   (lambda (scheme-source cisc-output) ;gets names of files
     (let ((sexpr (file->sexpr scheme-source)))
-      (print_all (list (cons "sexpr after process " sexpr)))
+      ;(print_all (list (cons "sexpr after process " sexpr)))
       (let ((parsed-exp (parse sexpr)))
-        (let((ready_code (run-ass3 parsed-exp)))
-          ;(print_all (list (cons "ready_code" ready_code)))
+        (let((ready_code parsed-exp));(run-ass3 parsed-exp)))
+          (print_all (list (cons "ready_code" ready_code)))
           (let ((ans (build-tables ready_code)))
-            (display "starting write const table") (newline) 
-            ;(get-ctbl) ; !!!!!!!!!!!!!!~change this~!!!!!!!!!!
-            ;(get-fvar-table)
-            ;(fvar-table-address-builder (get-fvar-table) (get-fvar-table-start-location) )
-            ;(get-symtable-data)
-            ; ans
+            (let ((code-gen-ans "code-gen-not-implemented"))
 
-              (write-in-code (string-append  (define-const-table) (load-const-table))
-
+              ;(make-full-code cisc-output code-gen-ans)
+              (fvar-table-address-builder (get-fvar-table) (get-ctbl-end-address))
+              (fVar-table-lookup-address 'a)
+              )
             
-            )
-          
-          ))))))
-
-
-
-(define file->sexpr
-  (lambda (input)
-    (let ((file2sexpr-ans  (car (list->sexpr (file->list input)))))
-      (print_all (list (cons "file2sexpr-ans" file2sexpr-ans)))
-      file2sexpr-ans
-      )))
-
-
-(define list->sexpr
-  (lambda(file-as-list)
-    (let ((cont (lambda(match remaining) 
-                  (if (null? remaining) 
-                      (list match) 
-                      (cons match (list->sexpr remaining)))))
-          (fail (lambda(x) `(failed ,x))))
-      
-      (<Sexpr> file-as-list cont fail) 
-      )))
-
-(define file->list
-  (lambda (in-file)
-    (let ((in-port (open-input-file in-file)))
-      (letrec ((run
-                (lambda ()
-                  (let ((ch (read-char in-port)))
-                    (if (eof-object? ch)
-                        (begin
-                          (close-input-port in-port)
-                          '())
-                        (cons ch (run)))))))
-        ;(list->string
-        (run)))));)
+            ))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;Code-gen;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2086,7 +2065,7 @@
 
 
 ;fvars
-(define free-var-boxed-list
+#;(define free-var-boxed-list
   (box '((cons prim_cons)
          (boolean? is_boolean)
          (+ prim_plus)
@@ -2130,38 +2109,6 @@
          (string->symbol prim_string_to_symbol)
          (eq? prim_is_eq)
          )))
-
-;;;;;;;;;;;;;;;;;;;;;;;;borrowed;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-       
-
-(define document
-  (lambda (depth code . comment)
-                     code
-                     ))
-
-
-
-
-
-#;(define MOV
-  (lambda (adr item)
-    (string-append "MOV(" adr "," item ")")))
-
-#;(define IND
-  (lambda (adr)
-    (string-append "IND(" adr ")")))
-
-#;(define INDD
-  (lambda (adr dis)
-    (string-append "INDD(" adr "," dis ")")))
-
-#;(define IMM
-  (lambda (adr)
-    (string-append "IMM(" adr ")")))
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;junk-yard;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

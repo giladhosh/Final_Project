@@ -15,6 +15,12 @@
 
 int main(){
 	START_MACHINE;
+ /* Allocate memory for constants and free variables */ "
+
+; PUSH(" (to-string (total-tables-end)) "); 
+       ;CALL(MALLOC);
+       ; DROP(1);
+"
 	JUMP(START);
 	#include \"arch/char.lib\"
 	#include \"arch/io.lib\"
@@ -28,6 +34,7 @@ int main(){
 	#define SOB_NIL 2
 	#define SOB_TRUE 3
 	#define SOB_FALSE 5
+#define undefined  7
 
 START:
 	MOV(R0, R0);
@@ -46,11 +53,16 @@ DROP(1);
 
 (define get-after-prolog
   (lambda ()
-    (begin 
-           (string-append (define-const-table-cisc) (load-const-table-cisc) ;making constant table string
-                          ;(define-fvart-cisc) (load-fvar-ta-cisc) ;making fvar table string
-                          )
-    )))
+    (begin
+      (string-append (define-const-table-cisc) (load-const-table-cisc) ;making constant table string
+
+                     (begin
+                       (fvar-table-address-builder (get-fvar-table) (get-ctbl-end-address)) ;sets addresses after constable
+                        (string-append (define-fvar-table) (load-fvar-table)) ;making fvar table string
+                       ; (string-append (define-sym-table)) ;add load sym table
+                       )
+                     )
+      )))
 
 
 (define get-epilog
@@ -101,7 +113,9 @@ L_no_print:
 
 (define make-full-code
   (lambda(cisc-output code-gen-ans)
-    (write-file (string-append (get-prolog) (get-after-prolog) " \n "  " \n " (get-epilog)) ;add code gen
+    (write-file (string-append (get-prolog) (get-after-prolog) " \n "
+                               ;"code-gen-ans"  ;add code gen
+                               " \n " (get-epilog)) 
                 cisc-output)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;read from file;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -166,6 +180,8 @@ L_no_print:
       (close-output-port *out-file-port*)
       (set! *out-file-port* 0))))
 
+;;;;;;;;;;;;;;;;tester;;;;;;;;;;;;;;;;;;;;
 (define write-in-code
   (lambda (txt)
    (write-file txt "out.txt")))
+

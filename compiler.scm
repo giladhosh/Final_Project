@@ -1749,7 +1749,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;constant table ;;;;;;;;;
-(define *ctbl-start-location* 7) ;start location for constants
+(define *ctbl-start-location* 1000) ;start location for constants
 (define *init-ctbl* '()) ;initial value of constant table
 (define make-ctbl cons) ;(lambda (tbl-size tbl) (cons tbl-size tbl))) == cons ; constant table maker
 (define constant-tbl (box (make-ctbl *ctbl-start-location* *init-ctbl*))) ;the constant table
@@ -1903,9 +1903,20 @@
 (define *sym-table-size* 0)
 ;Initialization of symbol table.
 (define symbol-table (box '()))
+
 ;get symbol table data
 (define get-symtable-data 
   (lambda () (unbox symbol-table)))
+
+
+;Getter: address out of symbol table entry.
+(define stbl-entry->rel-addr car)
+;Getter: symbol out of symbol table entry.
+(define stbl-entry->symbol cadr)
+;Getter: data out of symbol table entry.
+(define stbl-entry->data caddr)
+;Getter: next symbol out of symbol table entry.
+(define stbl-entry->next cadddr)
 
 (define get-symtable-entry-next caddr)
 (define get-symtable-entry-symb car)
@@ -1935,6 +1946,17 @@
                           (add-to-end-of-lst (fix-address-of-before-last entry-address table) 
                                              (list symb entry-address 0)))))
           ))))
+
+;;;;;;borrowed;;;;;;;;
+;Defines the symbol table.
+(define define-sym-table
+  (lambda ()
+    (let* ((table (unbox sym-tab))
+           (all-data (apply append (map stbl-entry->full-data table)))
+           (data-string (map (lambda (value) (string-append (to-string value) ", ")) all-data))
+           (const-array (string-append "long sym_table[] = { " (apply string-append data-string) "};")))
+      (document 1 (string-append (indent 1) const-array nl) "(Initial) Symbol table definition"))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;fvar table ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2033,8 +2055,6 @@
             (let ((code-gen-ans "code-gen-not-implemented"))
 
               (make-full-code cisc-output code-gen-ans)
-              ;(ctbl-lookup-address 1)
-             ; (fVar-table-lookup-address 'a)
               )
             
             ))))))

@@ -17,6 +17,34 @@
 
 #define WORD_SIZE (sizeof(long))
 
+
+
+/* Support for identifying memory issues                */
+/* (stack over/underflow and RAM overuse), if activated */
+/*
+#define	TRACK_MEM
+#ifdef	TRACK_MEM
+	#define PUSH(x) { if (SP >= STACK_SIZE) goto Lstack_overflow; M(stack)[SP++] = (x); }
+	#define POP(x) { if (SP <= 0) goto Lstack_underflow; (x) = M(stack)[--SP]; }
+	#define DROP(n) { if (SP <= 0) goto Lstack_underflow; SP -= (n); }
+	#define	MOVSP(n) { if ((n) > STACK_SIZE) goto Lstack_overflow; if ((n) < 0) goto Lstack_underflow; SP = (n); }
+	#define	ADDSP(n) { if (SP + (n) > STACK_SIZE) goto Lstack_overflow; SP += (n); }
+	#define	SUBSP(n) { if (SP - (n) < 0) goto Lstack_underflow; SP -= (n); }
+	#define	INCRSP() { if (SP + 1 > STACK_SIZE) goto Lstack_overflow; ++SP; }
+#else
+	#define PUSH(x) { M(stack)[SP++] = (x); }
+	#define POP(x) { (x) = M(stack)[--SP]; }
+	#define DROP(n) { SP -= (n); }
+	#define	ADDSP(n) { SP += (n); }
+	#define	SUBSP(n) { SP -= (n); }
+	#define	INCRSP() { ++SP; }
+#endif
+*/
+
+//#define PUSH(x) { M(stack)[SP++] = (x); }
+
+
+
 typedef struct Machine {
   long mem[RAM_SIZE];
   long stack[STACK_SIZE];
@@ -25,6 +53,7 @@ typedef struct Machine {
   long sp, fp;
   long test_result;
 } Machine;
+
 
 extern Machine *machine;
 
@@ -53,6 +82,42 @@ extern Machine *machine;
 #define SP (M(sp))
 #define FP (M(fp))
 
+#define PUSHALL { PUSH(R1); \
+                  PUSH(R2); \
+                  PUSH(R3); \
+                  PUSH(R4); \
+                  PUSH(R5); \
+                  PUSH(R6); \
+                  PUSH(R7); \
+                  PUSH(R8); \
+                  PUSH(R9); \
+                  PUSH(R10); \
+                  PUSH(R11); \
+                  PUSH(R12); \
+                  PUSH(R13); \
+                  PUSH(R14); \
+                  PUSH(R15); \
+}
+
+#define POPALL {  POP(R15); \
+                  POP(R14); \
+                  POP(R13); \
+                  POP(R12); \
+                  POP(R11); \
+                  POP(R10); \
+                  POP(R9); \
+                  POP(R8); \
+                  POP(R7); \
+                  POP(R6); \
+                  POP(R5); \
+                  POP(R4); \
+                  POP(R3); \
+                  POP(R2); \
+                  POP(R1); \
+}
+
+#define MINUS(x) { (x) = -(x); }
+
 #define IMM(n) (L(n))
 #define IND(r) (M(mem)[(r)])
 #define INDD(r, d) (M(mem)[(r) + (d)])
@@ -60,8 +125,12 @@ extern Machine *machine;
 #define STACK(n) (M(stack)[(n)])
 #define STARG(n) (STACK(SP-(n)-2))
 #define FPARG(n) (STACK(FP-(n)-3))
+#define SCMARG(n) (STACK(FP-(n)-5))
 #define LOCAL(n) (STACK(FP+(n)))
 #define LABEL(l) (L(&&l))
+#define	NUM_ARGS (FPARG(1))
+	#define	MOVSP(n) {  SP = (n); }
+	#define	ADDSP(n) {  SP += (n); }
 
 /* definition of the opcodes */
 

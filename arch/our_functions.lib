@@ -1,0 +1,81 @@
+/* 
+ * our_functions.lib
+ */
+
+//make_sob_symbol
+#include "lib/our_functions/make_sob_symbol.asm"
+#include "lib/our_functions/inv.asm"
+#include "lib/our_functions/is_fraction.asm"
+#include "lib/our_functions/apply.asm" 
+
+#include "lib/our_functions/less_than.asm"
+#include "lib/our_functions/num_equal.asm"
+#include "lib/our_functions/greater_than.asm"
+
+//#include "lib/our_functions/plus_bin.asm"
+#include "lib/our_functions/plus.asm"
+
+//#include "lib/our_functions/minusTEST.asm"
+#include "lib/our_functions/minus.asm"
+
+#include "lib/our_functions/division.asm"
+
+//IS_SOB_BOOL
+#include "lib/our_functions/car.asm"
+#include "lib/our_functions/cdr.asm"
+
+#include "lib/our_functions/char_to_int.asm"
+
+//#include "lib/our_functions/is_char.asm"
+
+#include "lib/our_functions/cons.asm"
+#include "lib/our_functions/is_eq.asm"
+
+//#include "lib/our_functions/is_integer.asm" //  mayer 
+#include "lib/our_functions/int_to_char.asm" //mayer
+
+#include "lib/our_functions/make_string.asm"
+#include "lib/our_functions/make_vector.asm" //mayer
+//#include "lib/our_functions/is_null.asm" //mayer
+#include "lib/our_functions/is_number.asm" 
+//#include "lib/our_functions/is_pair.asm" //mayer
+//#include "lib/our_functions/is_procedure.asm" //mayer
+#include "lib/our_functions/set_car.asm"
+#include "lib/our_functions/set_cdr.asm"
+
+//#include "lib/our_functions/string_length.asm" use mayers
+
+#include "lib/our_functions/string_ref.asm"
+#include "lib/our_functions/string_set.asm"
+#include "lib/our_functions/string_to_symbol.asm" //TODO
+#include "lib/our_functions/is_string.asm"
+#include "lib/our_functions/is_symbol.asm"
+#include "lib/our_functions/symbol_to_string.asm"
+
+#include "lib/our_functions/vector_length.asm"
+#include "lib/our_functions/vector_ref.asm"
+#include "lib/our_functions/vector_set.asm"
+#include "lib/our_functions/is_vector.asm"
+//#include "lib/our_functions/is_rational.asm"
+
+#include "lib/our_functions/is_zero.asm" 
+
+#include "lib/our_functions/multiplication.asm"
+
+#include "lib/scheme/write_sob_frac.asm"
+#include "lib/scheme/make_sob_frac.asm"
+
+#include "lib/our_functions/not.asm"
+#include "lib/our_functions/denominator.asm"
+#include "lib/our_functions/numerator.asm"
+#include "lib/our_functions/vector.asm"
+
+#include "lib/our_functions/gcd.asm"
+#include "lib/our_functions/is_boolean.asm"
+#include "lib/our_functions/remainder.asm"
+
+
+
+
+
+
